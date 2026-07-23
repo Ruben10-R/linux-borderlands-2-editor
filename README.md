@@ -1,4 +1,4 @@
-# linux-borderlands-editor
+# linux-borderlands-2-editor
 
 A native Linux save editor for **Borderlands 2** — our own product, not a port.
 One binary that is **both** a GUI (Gibbed feature parity) **and** a CLI editor.
