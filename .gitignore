@@ -1,0 +1,16 @@
+# Rust / Cargo build output
+target/
+**/target/
+
+# Containerized-build cache (created by ./run.sh)
+.docker-cache/
+
+# JetBrains RustRover
+.idea/
+
+# PoC output + save backups
+poc-roundtrip/roundtrip-out.sav
+**/*.sav.bak
+
+# Real save copies — keep personal saves (and Steam ID) out of the public repo
+samples/*.sav
