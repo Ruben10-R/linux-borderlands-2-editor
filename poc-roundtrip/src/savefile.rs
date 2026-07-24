@@ -272,7 +272,12 @@ pub fn decode(raw: &[u8], lzo: &LZO) -> Result<Decoded, Box<dyn Error>> {
 
 /// Encode protobuf bytes back into a full .sav (reverse pipeline).
 pub fn encode(proto: &[u8], lzo: &mut LZO) -> Result<Vec<u8>, Box<dyn Error>> {
-    let huff = huffman_encode(proto);
+    let mut huff = huffman_encode(proto);
+    // The game's Huffman decoder reads a few bits PAST the last symbol's code
+    // (byte/word-aligned reads), so the payload needs trailing padding or the
+    // game reads off the end of the buffer and rejects the save as corrupt.
+    // apocalyptech/Gibbed append exactly 4 zero bytes here; match that.
+    huff.extend_from_slice(&[0, 0, 0, 0]);
 
     let mut wsg = Vec::new();
     wsg.extend_from_slice(b"WSG");
