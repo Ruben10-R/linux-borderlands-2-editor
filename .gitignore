@@ -5,6 +5,10 @@ target/
 # Containerized-build cache (created by ./run.sh)
 .docker-cache/
 
+# Trunk web-build output (bl2-gui)
+dist/
+**/dist/
+
 # JetBrains RustRover
 .idea/
 

@@ -1,0 +1,38 @@
+# Read-only Borderlands 2 save viewer (WASM), served in your browser.
+#
+#   docker compose up          ->  build + serve at http://localhost:8080
+#
+# Nothing is installed on the host: the Rust toolchain and `trunk` live in the
+# container; caches live in named volumes (not your source tree). First run is
+# slow (compiles egui + downloads trunk/wasm-bindgen); later runs are cached.
+services:
+  gui:
+    image: rust:1
+    working_dir: /work/bl2-gui
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/work
+      - bl2-gui-cargo:/cargo
+      - bl2-gui-target:/target
+    environment:
+      CARGO_HOME: /cargo
+      CARGO_TARGET_DIR: /target
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        export PATH="/cargo/bin:$$PATH"
+        rustup target add wasm32-unknown-unknown
+        mkdir -p /cargo/bin
+        if ! command -v trunk >/dev/null 2>&1; then
+          echo "fetching trunk (prebuilt, one-time)..."
+          curl -sSfL https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xzf - -C /cargo/bin trunk
+        fi
+        exec trunk serve --address 0.0.0.0 --port 8080
+
+volumes:
+  bl2-gui-cargo:
+  bl2-gui-target:

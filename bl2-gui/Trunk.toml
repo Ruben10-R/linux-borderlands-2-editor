@@ -1,0 +1,6 @@
+# Build config for the web/WASM viewer (served via docker compose).
+[build]
+# Stable output filenames (no content hash) — simpler to serve from a container.
+filehash = false
+# Keep build output out of the source tree.
+dist = "/tmp/bl2-gui-dist"
