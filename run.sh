@@ -5,11 +5,12 @@
 # Build artifacts + the crate cache live in ./.docker-cache (gitignored),
 # owned by your user, so re-runs are fast and nothing is root-owned.
 #
-# Usage:
-#   ./run.sh                              # cargo run (defaults to save0001.sav)
-#   ./run.sh run ../samples/save0002.sav  # pass args through to cargo
-#   ./run.sh build --release              # any cargo subcommand
-#   ./run.sh test
+# Usage (workspace root is the build context):
+#   ./run.sh                                              # bl2edit --help
+#   ./run.sh run -p bl2-cli -- info samples/save0001.sav  # run the CLI
+#   ./run.sh run -p bl2-cli -- set-money samples/save0001.sav 12345
+#   ./run.sh test                                         # test the whole workspace
+#   ./run.sh build --release                              # any cargo subcommand
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -17,9 +18,9 @@ IMAGE="rust:1"
 CACHE="$PWD/.docker-cache"
 mkdir -p "$CACHE/cargo" "$CACHE/target"
 
-# Default to `cargo run` when called with no arguments.
+# Default to running the CLI's help when called with no arguments.
 ARGS=("$@")
-[ ${#ARGS[@]} -eq 0 ] && ARGS=(run)
+[ ${#ARGS[@]} -eq 0 ] && ARGS=(run -p bl2-cli -- --help)
 
 # Allocate a TTY only when we actually have one (so CI / non-interactive works).
 TTY=()
@@ -31,5 +32,5 @@ exec docker run --rm "${TTY[@]}" \
   -v "$PWD":/work \
   -v "$CACHE/cargo":/cargo \
   -v "$CACHE/target":/target \
-  -w /work/poc-roundtrip \
+  -w /work \
   "$IMAGE" cargo "${ARGS[@]}"

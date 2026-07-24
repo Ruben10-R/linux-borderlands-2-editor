@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["bl2-save", "bl2-cli", "poc-roundtrip"]
+
+# Shared dependency versions, so every crate stays in lockstep.
+[workspace.dependencies]
+minilzo-rs = "0.6"   # canonical MiniLZO (same LZO1x Gibbed/the game use)
+sha1 = "0.10"
+crc32fast = "1.4"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+bl2-save = { path = "bl2-save" }

@@ -1,0 +1,11 @@
+[package]
+name = "bl2-save"
+version = "0.1.0"
+edition = "2021"
+description = "Borderlands 2 save-file core: LZO/Huffman/CRC codec + surgical field editing."
+
+[dependencies]
+minilzo-rs = { workspace = true }
+sha1 = { workspace = true }
+crc32fast = { workspace = true }
+thiserror = { workspace = true }
