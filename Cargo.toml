@@ -4,7 +4,7 @@ members = ["bl2-save", "bl2-cli", "poc-roundtrip"]
 
 # Shared dependency versions, so every crate stays in lockstep.
 [workspace.dependencies]
-minilzo-rs = "0.6"   # canonical MiniLZO (same LZO1x Gibbed/the game use)
+lzokay-native = "0.1"   # pure-Rust LZO1x (compiles to WASM; no C dependency)
 sha1 = "0.10"
 crc32fast = "1.4"
 clap = { version = "4", features = ["derive"] }

@@ -5,7 +5,13 @@ edition = "2021"
 description = "Borderlands 2 save-file core: LZO/Huffman/CRC codec + surgical field editing."
 
 [dependencies]
-minilzo-rs = { workspace = true }
+lzokay-native = { workspace = true }
 sha1 = { workspace = true }
 crc32fast = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Test-only: the game uses a C LZO1x decompressor. We cross-check that our
+# (pure-Rust lzokay) compressed output is decodable by this canonical C impl,
+# which is a strong proxy for the game accepting it. Not shipped, not built for WASM.
+minilzo-rs = "0.6"

@@ -5,7 +5,6 @@
 //!
 //! Proven byte-correct against real saves AND accepted in-game (see PLAN.md §4.1).
 
-use minilzo_rs::LZO;
 use sha1::{Digest, Sha1};
 
 use crate::error::{Result, SaveError};
@@ -226,10 +225,6 @@ fn le32(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
-fn lzo() -> Result<LZO> {
-    LZO::init().map_err(|e| SaveError::Lzo(format!("init: {e:?}")))
-}
-
 // ---------- public decode / encode ----------
 
 /// A decoded save: the raw inner protobuf plus the checksums we validated.
@@ -250,14 +245,12 @@ pub fn decode(raw: &[u8]) -> Result<Decoded> {
     if raw.len() < 24 {
         return Err(SaveError::TooShort(raw.len()));
     }
-    let lzo = lzo()?;
 
     let sha_ok = sha1(&raw[20..]) == raw[0..20];
 
     let outer_size = be32(&raw[20..24]) as usize;
-    let outer = lzo
-        .decompress_safe(&raw[24..], outer_size)
-        .map_err(|e| SaveError::Lzo(format!("decompress: {e:?}")))?;
+    let outer = lzokay_native::decompress_all(&raw[24..], Some(outer_size))
+        .map_err(|e| SaveError::Lzo(format!("decompress: {e}")))?;
     if outer.len() != outer_size {
         return Err(SaveError::Size(format!(
             "LZO output {} != declared outer size {}",
@@ -299,8 +292,6 @@ pub fn decode(raw: &[u8]) -> Result<Decoded> {
 
 /// Encode protobuf bytes back into a full `.sav` (reverse pipeline).
 pub fn encode(proto: &[u8]) -> Result<Vec<u8>> {
-    let mut lzo = lzo()?;
-
     let mut huff = huffman_encode(proto);
     // The game's Huffman decoder reads a few bits PAST the last symbol's code
     // (aligned reads), so the payload needs trailing padding or the game reads
@@ -319,9 +310,8 @@ pub fn encode(proto: &[u8]) -> Result<Vec<u8>> {
     outer.extend_from_slice(&(wsg.len() as u32).to_be_bytes());
     outer.extend_from_slice(&wsg);
 
-    let compressed = lzo
-        .compress(&outer)
-        .map_err(|e| SaveError::Lzo(format!("compress: {e:?}")))?;
+    let compressed = lzokay_native::compress(&outer)
+        .map_err(|e| SaveError::Lzo(format!("compress: {e}")))?;
 
     let mut body = Vec::new();
     body.extend_from_slice(&(outer.len() as u32).to_be_bytes());

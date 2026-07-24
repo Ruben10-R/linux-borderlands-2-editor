@@ -229,6 +229,21 @@ mod tests {
         assert_eq!(&s.proto[f9.val_start + 1..f9.end], &[0xDE, 0xAD, 0xBE]);
     }
 
+    /// The game decompresses saves with a C LZO1x implementation. Prove our
+    /// pure-Rust `lzokay` compressed output is decodable by that canonical C impl
+    /// (`minilzo`) — i.e. it is standard LZO1x the game will accept.
+    #[test]
+    fn lzokay_output_is_decodable_by_c_lzo() {
+        // Semi-structured data so the compressor actually emits matches + literals.
+        let outer: Vec<u8> = (0..8192u32)
+            .map(|i| ((i as u8).wrapping_mul(37)) ^ ((i >> 3) as u8))
+            .collect();
+        let comp = lzokay_native::compress(&outer).expect("lzokay compress");
+        let mut lzo = minilzo_rs::LZO::init().expect("minilzo init");
+        let back = lzo.decompress_safe(&comp, outer.len()).expect("C LZO decompress");
+        assert_eq!(back, outer, "C LZO must decode lzokay output → the game will too");
+    }
+
     #[test]
     fn full_edit_still_encodes_and_self_verifies() {
         let mut s = SaveFile { proto: synthetic_proto() };
@@ -254,5 +269,15 @@ mod tests {
         let reloaded = SaveFile::from_bytes(&bytes).unwrap();
         assert_eq!(save.money(), reloaded.money());
         assert!(save.level().is_some());
+
+        // Decisive game-acceptance proxy: our (lzokay) re-encoded REAL save must be
+        // decompressible by the C LZO the game uses, to a valid WSG buffer.
+        let outer_size = u32::from_be_bytes(bytes[20..24].try_into().unwrap()) as usize;
+        let mut lzo = minilzo_rs::LZO::init().unwrap();
+        let outer = lzo
+            .decompress_safe(&bytes[24..], outer_size)
+            .expect("game's C LZO must decompress our real re-encoded save");
+        assert_eq!(outer.len(), outer_size, "decompressed size must match header");
+        assert_eq!(&outer[4..7], b"WSG", "decompressed buffer must be a WSG block");
     }
 }
