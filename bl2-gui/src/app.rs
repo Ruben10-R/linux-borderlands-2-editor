@@ -298,14 +298,24 @@ impl App {
     /// download on web), updating `status`.
     fn save_current(&mut self) {
         if let Some(pdoc) = self.profile.as_mut() {
-            let current = pdoc.profile.golden_keys().unwrap_or(0) as i64;
-            if pdoc.golden_keys != current {
+            if pdoc.golden_keys != pdoc.profile.golden_keys().unwrap_or(0) as i64 {
                 if let Err(e) = pdoc.profile.set_golden_keys(pdoc.golden_keys.clamp(0, 255) as u8) {
                     self.status = Some((true, format!("edit failed: {e}")));
                     return;
                 }
             }
-            self.status = Some(persist_profile(pdoc));
+            if pdoc.badass_rank != pdoc.profile.badass_rank().unwrap_or(0) as i64 {
+                if let Err(e) = pdoc.profile.set_badass_rank(pdoc.badass_rank.clamp(0, MAX) as i32) {
+                    self.status = Some((true, format!("edit failed: {e}")));
+                    return;
+                }
+            }
+            let status = persist_profile(pdoc);
+            // Refresh scratch: rank snaps to the LUT and tokens/available change.
+            pdoc.golden_keys = pdoc.profile.golden_keys().unwrap_or(0) as i64;
+            pdoc.badass_rank = pdoc.profile.badass_rank().unwrap_or(0) as i64;
+            pdoc.badass_tokens = pdoc.profile.badass_tokens().unwrap_or(0) as i64;
+            self.status = Some(status);
             return;
         }
         let Some(doc) = self.doc.as_mut() else {
@@ -699,7 +709,11 @@ fn profile_view(pdoc: &mut ProfileDoc, ui: &mut egui::Ui, accent: egui::Color32)
         ui.end_row();
 
         key(ui, "Badass Rank", accent);
-        ui.label(pdoc.badass_rank.to_string());
+        ui.horizontal(|ui| {
+            theme::flag(ui, 16.0, accent);
+            edit_number(ui, &mut pdoc.badass_rank, 100.0);
+            pdoc.badass_rank = pdoc.badass_rank.clamp(0, MAX);
+        });
         ui.end_row();
 
         key(ui, "Badass Tokens (unspent)", accent);
@@ -707,7 +721,7 @@ fn profile_view(pdoc: &mut ProfileDoc, ui: &mut egui::Ui, accent: egui::Color32)
         ui.end_row();
     });
     ui.add_space(6.0);
-    ui.weak("Golden Keys apply on Save/Download. Badass Rank editing and customization unlocks are coming next.");
+    ui.weak("Golden Keys and Badass Rank apply on Save/Download. Raising the rank grants the extra tokens to spend; customization unlocks are coming next.");
     ui.add_space(2.0);
     ui.colored_label(
         theme::DANGER,

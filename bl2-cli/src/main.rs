@@ -108,6 +108,13 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set Badass Rank in a profile.bin (grants the tokens to spend).
+    SetBadassRank {
+        profile: PathBuf,
+        rank: i32,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Dump every top-level protobuf field (read-only inspector).
     Raw {
         sav: PathBuf,
@@ -284,6 +291,7 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetHeadSkin { sav, head, skin, w } => cmd_set_head_skin(&sav, &head, &skin, w),
         Cmd::ProfileInfo { profile } => cmd_profile_info(&profile),
         Cmd::SetGoldenKeys { profile, count, w } => cmd_set_golden_keys(&profile, count, w),
+        Cmd::SetBadassRank { profile, rank, w } => cmd_set_badass_rank(&profile, rank, w),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
@@ -411,6 +419,30 @@ fn cmd_set_golden_keys(profile: &Path, count: u8, w: WriteOpts) -> Result<(), Sa
     println!("== set golden keys ==");
     println!("  input   : {}", profile.display());
     println!("  keys    : {before} -> {count}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    p.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_set_badass_rank(profile: &Path, rank: i32, w: WriteOpts) -> Result<(), SaveError> {
+    let mut p = ProfileFile::load(profile)?;
+    let before = p.badass_rank().unwrap_or(0);
+    p.set_badass_rank(rank)?;
+    let after = p.badass_rank().unwrap_or(0);
+    let out = w.out.as_deref().unwrap_or(profile);
+    println!("== set badass rank ==");
+    println!("  input   : {}", profile.display());
+    println!("  rank    : {before} -> {after}  (tokens available: {})", p.badass_tokens().unwrap_or(0));
     if w.dry_run {
         println!("  dry-run : nothing written");
         return Ok(());

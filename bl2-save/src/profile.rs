@@ -26,6 +26,25 @@ const DT_INT8: u8 = 8;
 const ID_BADASS_RANK1: u32 = 136; // Int32 (displayed rank = (136 + 137) / 10)
 const ID_BADASS_RANK2: u32 = 137; // Int32
 const ID_BADASS_TOKENS_AVAILABLE: u32 = 138; // Int32
+const ID_BADASS_TOKENS_EARNED: u32 = 139; // Int32
+const MAX_BADASS_TOKENS: i64 = 62530;
+
+/// Badass rank produced by `t` earned tokens: `floor(t^1.8)`.
+fn rank_from_tokens(t: i64) -> i64 {
+    (t.max(0) as f64).powf(1.8).floor() as i64
+}
+
+/// Fewest earned tokens whose rank is at least `rank`.
+fn tokens_for_rank(rank: i64) -> i64 {
+    if rank <= 0 {
+        return 0;
+    }
+    let mut t = ((rank as f64).powf(1.0 / 1.8).floor() as i64).max(0);
+    while t < MAX_BADASS_TOKENS && rank_from_tokens(t) < rank {
+        t += 1;
+    }
+    t.min(MAX_BADASS_TOKENS)
+}
 const ID_GOLDEN_KEYS: u32 = 162; // Binary: [{source u8, num u8, used u8}...]
 const GOLDEN_SOURCE_SHIFT: u8 = 0;
 
@@ -190,6 +209,16 @@ impl ProfileFile {
         }
     }
 
+    fn set_int32(&mut self, id: u32, val: i32) -> Result<()> {
+        let e = self
+            .entries
+            .iter_mut()
+            .find(|e| e.id == id && e.data_type == DT_INT32)
+            .ok_or_else(|| SaveError::Proto(format!("profile has no int32 field {id}")))?;
+        e.value = val.to_be_bytes().to_vec();
+        Ok(())
+    }
+
     /// Displayed Badass Rank = (entry 136 + entry 137) / 10. Read-only for now
     /// (setting it needs token math — slice 2).
     pub fn badass_rank(&self) -> Option<i32> {
@@ -199,9 +228,30 @@ impl ProfileFile {
         }
     }
 
-    /// Unspent Badass tokens (read-only for now).
+    /// Unspent Badass tokens available to invest.
     pub fn badass_tokens(&self) -> Option<i32> {
         self.int32(ID_BADASS_TOKENS_AVAILABLE)
+    }
+
+    /// Set the Badass Rank. Raises `earned` to the tokens needed for the rank and
+    /// adds the same delta to `available`, so the game's `invested + available ==
+    /// earned` invariant is preserved without touching invested bonus stats. The
+    /// stored rank (entries 136/137) is set from the achievable rank. Lowering the
+    /// rank below already-invested tokens clamps available to 0.
+    pub fn set_badass_rank(&mut self, rank: i32) -> Result<()> {
+        let earned = tokens_for_rank(rank.max(0) as i64);
+        let actual_rank = rank_from_tokens(earned); // >= requested (LUT granularity)
+        let cur_earned = self.int32(ID_BADASS_TOKENS_EARNED).unwrap_or(0) as i64;
+        let cur_avail = self.int32(ID_BADASS_TOKENS_AVAILABLE).unwrap_or(0) as i64;
+        let new_avail = (cur_avail + (earned - cur_earned)).max(0);
+
+        // Displayed rank = (136 + 137) / 10, so each holds (rank * 10) / 2.
+        let half = ((actual_rank * 10) / 2) as i32;
+        self.set_int32(ID_BADASS_RANK1, half)?;
+        self.set_int32(ID_BADASS_RANK2, half)?;
+        self.set_int32(ID_BADASS_TOKENS_EARNED, earned as i32)?;
+        self.set_int32(ID_BADASS_TOKENS_AVAILABLE, new_avail as i32)?;
+        Ok(())
     }
 
     /// SHiFT Golden Keys available, or None if the profile has no key data.
@@ -259,7 +309,31 @@ mod tests {
             },
             Entry { start_byte: 2, id: ID_BADASS_RANK1, data_type: DT_INT32, value: vec![0, 0, 0, 200], end_byte: 0 },
             Entry { start_byte: 2, id: ID_BADASS_RANK2, data_type: DT_INT32, value: vec![0, 0, 0, 100], end_byte: 0 },
+            Entry { start_byte: 2, id: ID_BADASS_TOKENS_AVAILABLE, data_type: DT_INT32, value: vec![0, 0, 0, 0], end_byte: 0 },
+            Entry { start_byte: 2, id: ID_BADASS_TOKENS_EARNED, data_type: DT_INT32, value: vec![0, 0, 0, 30], end_byte: 0 },
         ]
+    }
+
+    #[test]
+    fn badass_rank_set_preserves_sanity() {
+        // rank/tokens helpers are inverse-ish.
+        assert!(rank_from_tokens(tokens_for_rank(500)) >= 500);
+        assert_eq!(tokens_for_rank(0), 0);
+
+        let bytes = compress(&serialize_entries(&synthetic())).unwrap();
+        let mut p = ProfileFile::from_bytes(&bytes).unwrap();
+        // start: earned 30, available 0 → invested = 30.
+        let invested = p.int32(ID_BADASS_TOKENS_EARNED).unwrap() - p.badass_tokens().unwrap();
+        assert_eq!(invested, 30);
+        p.set_badass_rank(1000).unwrap();
+        let out = p.to_bytes().expect("badass self-verify");
+        let re = ProfileFile::from_bytes(&out).unwrap();
+        // Sanity invariant preserved: invested + available == earned.
+        let earned = re.int32(ID_BADASS_TOKENS_EARNED).unwrap();
+        let avail = re.badass_tokens().unwrap();
+        assert_eq!(invested + avail, earned, "invested + available == earned");
+        assert!(re.badass_rank().unwrap() >= 1000, "rank raised to >= 1000");
+        assert_eq!(re.golden_keys(), Some(3), "golden keys untouched");
     }
 
     #[test]
