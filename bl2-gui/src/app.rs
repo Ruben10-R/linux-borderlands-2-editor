@@ -791,14 +791,21 @@ impl App {
             te.request_focus();
             let needle = doc.part_filter.to_lowercase();
             ui.separator();
-            egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink(false).max_height(380.0).show(ui, |ui| {
                 for opt in doc
                     .part_catalog
                     .iter()
                     .filter(|o| needle.is_empty() || o.name.to_lowercase().contains(&needle))
                 {
                     let selected = Some((opt.lib, opt.asset)) == cur;
-                    if ui.selectable_label(selected, &opt.name).clicked() {
+                    // full-width row so the highlight/layout doesn't jump per item
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 20.0],
+                            egui::Button::selectable(selected, &opt.name),
+                        )
+                        .clicked()
+                    {
                         pending = Some((opt.lib, opt.asset));
                     }
                 }
@@ -878,19 +885,28 @@ impl App {
             ui.separator();
 
             let row_h = ui.text_style_height(&egui::TextStyle::Body) + 8.0;
-            egui::ScrollArea::vertical().max_height(420.0).show_rows(ui, row_h, matches.len(), |ui, range| {
-                egui::Grid::new("lib_grid").num_columns(3).spacing([12.0, 4.0]).striped(true).show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink(false) // keep full width so rows don't jump while scrolling
+                .max_height(420.0)
+                .show_rows(ui, row_h, matches.len(), |ui, range| {
                     for &mi in &matches[range] {
                         let e = &lib[mi];
-                        if ui.small_button("Add").clicked() {
-                            add = Some(mi);
-                        }
-                        ui.monospace(&e.name).on_hover_text(format!("{}\nLv {}\n{}", e.family, e.level, e.code));
-                        ui.weak(&e.family);
-                        ui.end_row();
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([44.0, row_h - 3.0], egui::Button::new("Add")).clicked() {
+                                add = Some(mi);
+                            }
+                            ui.add_sized(
+                                [300.0, row_h - 3.0],
+                                egui::Label::new(egui::RichText::new(&e.name).monospace())
+                                    .truncate(),
+                            )
+                            .on_hover_text(format!("{}\nLv {}\n{}", e.family, e.level, e.code));
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(&e.family).weak()).truncate(),
+                            );
+                        });
                     }
                 });
-            });
             ui.separator();
             if ui.button("Close").clicked() {
                 close = true;
