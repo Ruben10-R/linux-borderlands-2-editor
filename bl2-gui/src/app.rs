@@ -15,6 +15,27 @@ pub struct App {
     status: Option<(bool, String)>,
     theme: theme::Theme,
     show_help: bool,
+    tab: Tab,
+}
+
+/// Which editor tab is shown (more will be added — Fast Travel, Vehicle, …).
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Tab {
+    #[default]
+    Character,
+    Currency,
+    Items,
+}
+
+impl Tab {
+    const ALL: [Tab; 3] = [Tab::Character, Tab::Currency, Tab::Items];
+    fn label(self) -> &'static str {
+        match self {
+            Tab::Character => "Character",
+            Tab::Currency => "Currency",
+            Tab::Items => "Items",
+        }
+    }
 }
 
 /// One loaded save: the parsed file plus editable scratch values.
@@ -253,6 +274,7 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let accent = self.theme.accent();
+            let text = self.theme.text();
 
             // Header: original emblem + wordmark.
             ui.add_space(6.0);
@@ -261,9 +283,7 @@ impl eframe::App for App {
                 ui.add_space(10.0);
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("BL2 SAVE EDITOR").color(accent).size(24.0).strong());
-                    ui.label(
-                        egui::RichText::new("edit your General stats").color(self.theme.text()).italics(),
-                    );
+                    ui.label(egui::RichText::new("Borderlands 2 save editor").color(text).italics());
                 });
             });
 
@@ -278,158 +298,66 @@ impl eframe::App for App {
                     }
                 }
             });
-
             ui.add_space(4.0);
             ui.separator();
-            ui.label("Drag a .sav file onto this window to load it.");
-            ui.add_space(6.0);
 
-            if self.doc.is_some() {
-                let accent = self.theme.accent();
-                {
-                    let doc = self.doc.as_mut().unwrap();
-                    egui::Grid::new("general")
-                        .num_columns(2)
-                        .spacing([24.0, 8.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            field(ui, "File", &doc.name, accent);
-                            field(ui, "Class", &doc.class, accent);
-
-                            key(ui, "Level", accent);
-                            edit_number(ui, &mut doc.level, 1.0);
-                            ui.end_row();
-
-                            key(ui, "XP", accent);
-                            edit_number(ui, &mut doc.xp, 1000.0);
-                            ui.end_row();
-
-                            key(ui, "Money", accent);
-                            ui.horizontal(|ui| {
-                                theme::coin(ui, 16.0);
-                                edit_number(ui, &mut doc.money, 5000.0);
-                            });
-                            ui.end_row();
-
-                            key(ui, "Eridium", accent);
-                            ui.horizontal(|ui| {
-                                theme::eridium(ui, 16.0);
-                                edit_number(ui, &mut doc.eridium, 1.0);
-                            });
-                            ui.end_row();
-                        });
-                } // doc borrow ends
-
-                ui.add_space(12.0);
-                let label = if cfg!(target_arch = "wasm32") {
-                    "⬇  Download edited save"
-                } else {
-                    "💾  Save (with backup)"
-                };
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new(label).strong()).clicked() {
-                        self.save_current();
-                    }
-                    if cfg!(target_arch = "wasm32")
-                        && ui.button("ⓘ  How to install this save").clicked()
-                    {
-                        self.show_help = true;
-                    }
-                });
-                if cfg!(target_arch = "wasm32") {
-                    ui.add_space(2.0);
-                    ui.weak("Downloads a .sav — click \u{201c}How to install\u{201d} to put it in your game.");
-                }
-            } else {
+            if self.doc.is_none() {
                 ui.add_space(8.0);
+                ui.label("Drag a .sav file onto this window to load it.");
+                ui.add_space(4.0);
                 ui.weak("No save loaded yet.");
+                if let Some((true, msg)) = &self.status {
+                    ui.add_space(8.0);
+                    ui.colored_label(theme::DANGER, msg);
+                }
+                return;
             }
 
+            // Global actions (apply to the whole save, whatever tab is open).
+            ui.add_space(6.0);
+            let label = if cfg!(target_arch = "wasm32") {
+                "⬇  Download edited save"
+            } else {
+                "💾  Save (with backup)"
+            };
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new(label).strong()).clicked() {
+                    self.save_current();
+                }
+                if cfg!(target_arch = "wasm32")
+                    && ui.button("ⓘ  How to install this save").clicked()
+                {
+                    self.show_help = true;
+                }
+                ui.weak("· drag another .sav to load it");
+            });
             if let Some((is_err, msg)) = &self.status {
-                ui.add_space(8.0);
-                let col = if *is_err { theme::DANGER } else { self.theme.accent() };
+                let col = if *is_err { theme::DANGER } else { accent };
                 ui.colored_label(col, msg);
             }
 
-            // Editable item/weapon list (per-item leveling).
-            if self.doc.as_ref().is_some_and(|d| !d.items.is_empty()) {
-                let accent = self.theme.accent();
-                let text = self.theme.text();
-                ui.add_space(10.0);
-                let doc = self.doc.as_mut().unwrap();
-                let count = doc.items.len();
-                egui::CollapsingHeader::new(
-                    egui::RichText::new(format!("Items ({count})")).color(accent).strong(),
-                )
-                .default_open(true)
-                .show(ui, |ui| {
-                    // Convenience: set every levelable item to one level.
-                    ui.horizontal(|ui| {
-                        ui.label("Set all to level");
-                        ui.add(egui::DragValue::new(&mut doc.item_level).speed(1.0));
-                        doc.item_level = doc.item_level.clamp(1, 127);
-                        if ui
-                            .button("Apply to all")
-                            .on_hover_text("Sets every levelable item to this level. Locked ⚠ items are left alone.")
-                            .clicked()
-                        {
-                            let lvl = doc.item_level;
-                            for v in doc.items.iter_mut().filter(|v| v.levelable) {
-                                v.level = lvl;
-                            }
-                        }
-                    });
-                    ui.add_space(4.0);
-
-                    let mut open_parts = None;
-                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                        egui::Grid::new("items_grid")
-                            .num_columns(5)
-                            .spacing([16.0, 4.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for v in &mut doc.items {
-                                    ui.label(v.location);
-                                    let (kcol, kind) =
-                                        if v.is_weapon { (accent, "weapon") } else { (text, "item") };
-                                    ui.label(egui::RichText::new(kind).color(kcol).strong());
-                                    if v.levelable {
-                                        ui.add(egui::DragValue::new(&mut v.level).speed(1.0));
-                                        v.level = v.level.clamp(1, 127);
-                                    } else {
-                                        ui.horizontal(|ui| {
-                                            ui.monospace(format!("Lv {}", v.level));
-                                            ui.label(egui::RichText::new("⚠").color(theme::DANGER))
-                                                .on_hover_text(
-                                                    "No-level item (starter/special gear — some grenades, relics, class mods). \
-                                                     Leveling it can make the game drop it, so it's locked.",
-                                                );
-                                        });
-                                    }
-                                    ui.monospace(&v.name).on_hover_text(&v.details);
-                                    if ui.small_button("Parts").clicked() {
-                                        open_parts = Some(v.id);
-                                    }
-                                    ui.end_row();
-                                }
-                            });
-                    });
-                    if let Some(oid) = open_parts {
-                        doc.editing_parts =
-                            if doc.editing_parts == Some(oid) { None } else { Some(oid) };
-                        doc.editing_part_slot = None;
-                        doc.part_filter.clear();
+            // Tab bar.
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                for t in Tab::ALL {
+                    let label = egui::RichText::new(t.label())
+                        .color(if self.tab == t { accent } else { text })
+                        .strong();
+                    if ui.selectable_label(self.tab == t, label).clicked() {
+                        self.tab = t;
                     }
-                    ui.add_space(2.0);
-                    ui.weak(
-                        "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
-                         Click \u{201c}Parts\u{201d} to swap parts. Edited items unequip in-game — re-equip.",
-                    );
+                }
+            });
+            ui.separator();
+            ui.add_space(6.0);
 
-                    // Parts editor for the open item (its slot list; the picker
-                    // itself is a modal rendered below).
-                    parts_editor(doc, ui, accent);
-                });
+            // Tab content.
+            let tab = self.tab;
+            let doc = self.doc.as_mut().unwrap();
+            match tab {
+                Tab::Character => character_tab(doc, ui, accent),
+                Tab::Currency => currency_tab(doc, ui, accent),
+                Tab::Items => items_tab(doc, ui, accent, text),
             }
         });
 
@@ -513,6 +441,106 @@ impl App {
             doc.editing_part_slot = None;
         }
     }
+}
+
+/// Character tab: file, class, level, XP.
+fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    egui::Grid::new("character").num_columns(2).spacing([24.0, 8.0]).striped(true).show(ui, |ui| {
+        field(ui, "File", &doc.name, accent);
+        field(ui, "Class", &doc.class, accent);
+        key(ui, "Level", accent);
+        edit_number(ui, &mut doc.level, 1.0);
+        ui.end_row();
+        key(ui, "XP", accent);
+        edit_number(ui, &mut doc.xp, 1000.0);
+        ui.end_row();
+    });
+}
+
+/// Currency tab: money, eridium (seraph/torgue coming next slice).
+fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    egui::Grid::new("currency").num_columns(2).spacing([24.0, 8.0]).striped(true).show(ui, |ui| {
+        key(ui, "Money", accent);
+        ui.horizontal(|ui| {
+            theme::coin(ui, 16.0);
+            edit_number(ui, &mut doc.money, 5000.0);
+        });
+        ui.end_row();
+        key(ui, "Eridium", accent);
+        ui.horizontal(|ui| {
+            theme::eridium(ui, 16.0);
+            edit_number(ui, &mut doc.eridium, 1.0);
+        });
+        ui.end_row();
+    });
+}
+
+/// Items tab: backpack + bank list with per-item level + parts editing.
+fn items_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32, text: egui::Color32) {
+    if doc.items.is_empty() {
+        ui.weak("No items in backpack or bank.");
+        return;
+    }
+    // Convenience: set every levelable item to one level.
+    ui.horizontal(|ui| {
+        ui.label("Set all to level");
+        ui.add(egui::DragValue::new(&mut doc.item_level).speed(1.0));
+        doc.item_level = doc.item_level.clamp(1, 127);
+        if ui
+            .button("Apply to all")
+            .on_hover_text("Sets every levelable item to this level. Locked ⚠ items are left alone.")
+            .clicked()
+        {
+            let lvl = doc.item_level;
+            for v in doc.items.iter_mut().filter(|v| v.levelable) {
+                v.level = lvl;
+            }
+        }
+    });
+    ui.add_space(4.0);
+
+    let mut open_parts = None;
+    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+        egui::Grid::new("items_grid")
+            .num_columns(5)
+            .spacing([16.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for v in &mut doc.items {
+                    ui.label(v.location);
+                    let (kcol, kind) = if v.is_weapon { (accent, "weapon") } else { (text, "item") };
+                    ui.label(egui::RichText::new(kind).color(kcol).strong());
+                    if v.levelable {
+                        ui.add(egui::DragValue::new(&mut v.level).speed(1.0));
+                        v.level = v.level.clamp(1, 127);
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.monospace(format!("Lv {}", v.level));
+                            ui.label(egui::RichText::new("⚠").color(theme::DANGER)).on_hover_text(
+                                "No-level item (starter/special gear — some grenades, relics, class mods). \
+                                 Leveling it can make the game drop it, so it's locked.",
+                            );
+                        });
+                    }
+                    ui.monospace(&v.name).on_hover_text(&v.details);
+                    if ui.small_button("Parts").clicked() {
+                        open_parts = Some(v.id);
+                    }
+                    ui.end_row();
+                }
+            });
+    });
+    if let Some(oid) = open_parts {
+        doc.editing_parts = if doc.editing_parts == Some(oid) { None } else { Some(oid) };
+        doc.editing_part_slot = None;
+        doc.part_filter.clear();
+    }
+    ui.add_space(2.0);
+    ui.weak(
+        "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
+         Click \u{201c}Parts\u{201d} to swap parts. Edited items unequip in-game — re-equip.",
+    );
+    parts_editor(doc, ui, accent);
 }
 
 /// Render the open item's slot list. Each "change" opens the picker modal
