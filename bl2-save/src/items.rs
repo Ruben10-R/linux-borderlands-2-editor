@@ -179,6 +179,89 @@ pub fn set_item_part(
     Ok((out, changed))
 }
 
+// ---- Overpower level (stored as a "virtual item" in field 53) ----
+//
+// The game hides some DLC state in fake backpack items: a placeholder serial
+// (set == 255) whose field 2 ("quantity") holds a tagged, negated int64. The low
+// byte is an id — 4 = "Overpower levels unlocked" — and the level is the rest:
+//   stored = wrapping_neg(4 | (op_level << 8)).
+// Ported from apocalyptech's `_set_overpowered_level` / Gibbed's SaveExpansion.
+const OP_ID: u64 = 4;
+
+/// The 40-byte placeholder serial Gibbed uses when creating a fresh OP virtual
+/// item: version 7, zero key, then a body that decodes to set == 255, rest 0.
+const OP_BASE_SERIAL: [u8; 40] = [
+    0x07, 0x00, 0x00, 0x00, 0x00, 0x39, 0x2a, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+/// Is this item entry the OP-level virtual item (placeholder serial + field-2 tag 4)?
+/// Returns the decoded OP level if so.
+fn op_entry_level(entry: &[u8]) -> Option<i64> {
+    let ifields = proto::parse_fields(entry).ok()?;
+    let f2 = ifields.iter().find(|x| x.number == 2 && x.wire_type == 0)?;
+    let raw = proto::read_varint_value(entry, f2.val_start)? as u64;
+    let magnitude = raw.wrapping_neg();
+    if magnitude & 0xFF != OP_ID {
+        return None;
+    }
+    // Confirm the serial is a real placeholder (belt-and-suspenders vs a stray value).
+    let sf = ifields.iter().find(|x| x.number == 1 && x.wire_type == 2)?;
+    let serial = proto::wire2_content(entry, sf).ok()?;
+    if !serial::unwrap(serial).ok()?.is_placeholder() {
+        return None;
+    }
+    Some((magnitude >> 8) as i64)
+}
+
+/// Read the unlocked Overpower level, or None if the character has no OP data.
+pub fn read_op_level(protobuf: &[u8]) -> Result<Option<i64>> {
+    let fields = proto::parse_fields(protobuf)?;
+    for f in &fields {
+        if f.number != 53 || f.wire_type != 2 {
+            continue;
+        }
+        let entry = proto::wire2_content(protobuf, f)?;
+        if let Some(op) = op_entry_level(entry) {
+            return Ok(Some(op));
+        }
+    }
+    Ok(None)
+}
+
+/// Set the unlocked Overpower level, updating the existing virtual item or
+/// appending a fresh one (mirroring Gibbed). Returns the new protobuf.
+pub fn set_op_level(protobuf: &[u8], op: i64) -> Result<Vec<u8>> {
+    let magnitude: u64 = OP_ID | ((op.max(0) as u64 & 0x7F_FFFF) << 8);
+    let field2 = magnitude.wrapping_neg();
+
+    let fields = proto::parse_fields(protobuf)?;
+    let mut out = Vec::with_capacity(protobuf.len() + 48);
+    let mut done = false;
+    for f in &fields {
+        if !done && f.number == 53 && f.wire_type == 2 {
+            let entry = proto::wire2_content(protobuf, f)?;
+            if op_entry_level(entry).is_some() {
+                let ifields = proto::parse_fields(entry)?;
+                let new_entry = proto::upsert_varint_field(entry, &ifields, 2, field2 as i64);
+                proto::emit_wire2_field(&mut out, 53, &new_entry);
+                done = true;
+                continue;
+            }
+        }
+        out.extend_from_slice(&protobuf[f.tag_start..f.end]);
+    }
+    if !done {
+        let mut entry = Vec::new();
+        proto::emit_wire2_field(&mut entry, 1, &OP_BASE_SERIAL);
+        proto::emit_varint_field(&mut entry, 2, field2);
+        proto::emit_varint_field(&mut entry, 3, 0);
+        proto::emit_varint_field(&mut entry, 4, 0);
+        proto::emit_wire2_field(&mut out, 53, &entry);
+    }
+    Ok(out)
+}
+
 /// The raw serial bytes of the item with [`Item::id`] `target`, if present.
 pub fn serial_by_id(protobuf: &[u8], target: usize) -> Result<Option<Vec<u8>>> {
     let fields = proto::parse_fields(protobuf)?;

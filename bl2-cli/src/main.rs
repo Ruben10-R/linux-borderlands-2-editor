@@ -115,6 +115,13 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set the unlocked Overpower level (0 clears it; needs lvl 72 + UVHM).
+    SetOpLevel {
+        sav: PathBuf,
+        level: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Unlock all fast-travel stations (base game + DLC).
     UnlockStations {
         sav: PathBuf,
@@ -212,6 +219,13 @@ fn run() -> Result<(), SaveError> {
             "current playthrough",
             |s| s.active_playthrough(),
             |s| s.set_active_playthrough(index.clamp(0, 2)),
+        ),
+        Cmd::SetOpLevel { sav, level, w } => edit(
+            &sav,
+            w,
+            "op level",
+            |s| s.op_level().unwrap_or(0),
+            |s| s.set_op_level(level.clamp(0, 80)),
         ),
         Cmd::Customizations { sav } => cmd_customizations(&sav),
         Cmd::SetHeadSkin { sav, head, skin, w } => cmd_set_head_skin(&sav, &head, &skin, w),

@@ -70,6 +70,7 @@ struct Doc {
     skill_points: i64,
     playthroughs_completed: i64,
     active_playthrough: i64,
+    op_level: i64,
     money: i64,
     eridium: i64,
     seraph: i64,
@@ -193,6 +194,7 @@ impl App {
                     skill_points: s.skill_points().unwrap_or(0),
                     playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
                     active_playthrough: s.active_playthrough(),
+                    op_level: s.op_level().unwrap_or(0),
                     level: s.level().unwrap_or(0),
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
@@ -280,6 +282,10 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_skill_points(doc.skill_points.clamp(0, MAX))?;
     doc.save.set_playthroughs_completed(doc.playthroughs_completed.clamp(0, 3))?;
     doc.save.set_active_playthrough(doc.active_playthrough.clamp(0, 2))?;
+    // OP level — only rewrite the virtual item if it actually changed.
+    if doc.op_level != doc.save.op_level().unwrap_or(0) {
+        doc.save.set_op_level(doc.op_level.clamp(0, 80))?;
+    }
     // Class + name are best-effort (a stray save might lack those fields).
     if !doc.class_def.is_empty() {
         let _ = doc.save.set_class(&doc.class_def);
@@ -668,6 +674,14 @@ fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         });
         ui.end_row();
 
+        key(ui, "Overpower level", accent);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.op_level, 1.0);
+            doc.op_level = doc.op_level.clamp(0, 80);
+            ui.weak(if doc.op_level == 0 { "off" } else { "OP levels unlocked" });
+        });
+        ui.end_row();
+
         if let Some(id) = doc.save.save_game_id() {
             field(ui, "Save ID", &id.to_string(), accent);
         }
@@ -682,6 +696,10 @@ fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         theme::DANGER,
         "⚠ Set \u{201c}playthroughs completed\u{201d} to unlock TVHM/UVHM. Changing the current \
          playthrough switches the mode you load into — only do so if that mode is unlocked.",
+    );
+    ui.weak(
+        "Overpower level only matters at level 72 with UVHM completed; after saving, pick the OP \
+         level at the character-select screen.",
     );
 }
 

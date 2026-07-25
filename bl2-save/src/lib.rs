@@ -285,6 +285,12 @@ impl SaveFile {
         items::read_items(&self.proto)
     }
 
+    /// Unlocked Overpower level (0–80+), or None if the character has no OP data
+    /// yet. Stored as a hidden "virtual item" (see [`SaveFile::set_op_level`]).
+    pub fn op_level(&self) -> Option<i64> {
+        items::read_op_level(&self.proto).ok().flatten()
+    }
+
     // ---------- edits (each guarded so only the intended field changes) ----------
 
     fn set_currency_index(&mut self, index: usize, value: i64) -> Result<()> {
@@ -436,6 +442,16 @@ impl SaveFile {
             Some(serial) => Ok(Some(serial::to_code(&serial)?)),
             None => Ok(None),
         }
+    }
+
+    /// Set the unlocked Overpower level (0 clears it). Requires level 72 + a
+    /// completed UVHM to be meaningful in-game; the level is then selected at the
+    /// character screen. Stored as a hidden virtual item; only field 53 changes.
+    pub fn set_op_level(&mut self, op: i64) -> Result<()> {
+        let new = items::set_op_level(&self.proto, op)?;
+        proto::only_fields_changed(&self.proto, &new, &[53])?;
+        self.proto = new;
+        Ok(())
     }
 
     /// Import a `BL2(...)` item code as a new backpack (or bank) entry. The
@@ -845,5 +861,24 @@ mod tests {
             assert_eq!(app.name(), save.name(), "wearing edit must not touch name");
             eprintln!("golden: equipped head {:?} + skin {:?}", heads[0].name, skins[0].name);
         }
+
+        // Overpower level (virtual item in field 53): set 8, read back 8,
+        // self-verify, and re-set to 10 (exercises the update-in-place path).
+        let mut op = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        op.set_op_level(8).expect("set op 8");
+        let _ = op.to_bytes().expect("op edit must self-verify");
+        assert_eq!(op.op_level(), Some(8), "OP level reads back as 8");
+        op.set_op_level(10).expect("set op 10");
+        let _ = op.to_bytes().expect("op re-edit must self-verify");
+        assert_eq!(op.op_level(), Some(10), "OP level updates in place to 10");
+        assert_eq!(op.money(), save.money(), "op edit must not touch money");
+        assert_eq!(op.items().unwrap().len(), {
+            // setting OP twice must not keep appending virtual items
+            let mut o2 = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+            o2.set_op_level(1).unwrap();
+            o2.set_op_level(2).unwrap();
+            o2.items().unwrap().len()
+        }, "no duplicate OP virtual items");
+        eprintln!("golden: OP level {:?} -> 10", save.op_level());
     }
 }
