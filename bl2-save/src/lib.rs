@@ -107,6 +107,27 @@ impl SaveFile {
         proto::read_varint_field(&self.proto, &fields, proto::FIELD_XP)
     }
 
+    /// Available skill points.
+    pub fn skill_points(&self) -> Option<i64> {
+        let fields = self.fields().ok()?;
+        proto::read_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS)
+    }
+
+    /// Raw class-definition asset path (e.g. "GD_Siren.Character.CharClass_Siren").
+    pub fn class_def(&self) -> Option<String> {
+        let fields = self.fields().ok()?;
+        proto::read_string_field(&self.proto, &fields, proto::FIELD_CLASS)
+    }
+
+    /// Character name (from the appearance message, sub-field 1).
+    pub fn name(&self) -> Option<String> {
+        let fields = self.fields().ok()?;
+        let f = fields.iter().find(|f| f.number == proto::FIELD_APPEARANCE && f.wire_type == 2)?;
+        let inner = proto::wire2_content(&self.proto, f).ok()?;
+        let ifields = proto::parse_fields(inner).ok()?;
+        proto::read_string_field(inner, &ifields, 1)
+    }
+
     /// Full `currency_on_hand` array (index 0 = money, 1 = eridium, …).
     pub fn currency(&self) -> Result<Vec<i64>> {
         let fields = self.fields()?;
@@ -191,6 +212,46 @@ impl SaveFile {
         self.set_varint(proto::FIELD_XP, value)
     }
 
+    /// Set available skill points (added if the field is absent).
+    pub fn set_skill_points(&mut self, value: i64) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS, value);
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_SKILL_POINTS])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Change class (pass a def path from [`CLASSES`]). Note: does not reset skills.
+    pub fn set_class(&mut self, class_def: &str) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::rewrite_string_field(&self.proto, &fields, proto::FIELD_CLASS, class_def)?;
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_CLASS])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Set the character name (the appearance message's sub-field 1).
+    pub fn set_name(&mut self, name: &str) -> Result<()> {
+        let fields = self.fields()?;
+        let f = *fields
+            .iter()
+            .find(|f| f.number == proto::FIELD_APPEARANCE && f.wire_type == 2)
+            .ok_or_else(|| SaveError::Proto("appearance field missing".into()))?;
+        let inner = proto::wire2_content(&self.proto, &f)?;
+        let ifields = proto::parse_fields(inner)?;
+        let new_inner = if ifields.iter().any(|x| x.number == 1 && x.wire_type == 2) {
+            proto::rewrite_string_field(inner, &ifields, 1, name)?
+        } else {
+            let mut v = inner.to_vec();
+            proto::emit_wire2_field(&mut v, 1, name.as_bytes());
+            v
+        };
+        let new = proto::replace_field_content(&self.proto, &fields, proto::FIELD_APPEARANCE, &new_inner);
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_APPEARANCE])?;
+        self.proto = new;
+        Ok(())
+    }
+
     /// Set every backpack + bank item and weapon to `level` (grade + game stage).
     /// Items that shouldn't be leveled (grade absent or ≤ 1, e.g. some class
     /// mods/relics) are skipped unless `force` is set. Returns the count changed.
@@ -221,6 +282,17 @@ impl SaveFile {
         Ok(changed)
     }
 }
+
+/// The six playable classes: (display name, class-definition asset path).
+/// Paths extracted from Gibbed's GameInfo; pass the path to [`SaveFile::set_class`].
+pub const CLASSES: [(&str, &str); 6] = [
+    ("Axton (Commando)", "GD_Soldier.Character.CharClass_Soldier"),
+    ("Maya (Siren)", "GD_Siren.Character.CharClass_Siren"),
+    ("Salvador (Gunzerker)", "GD_Mercenary.Character.CharClass_Mercenary"),
+    ("Zer0 (Assassin)", "GD_Assassin.Character.CharClass_Assassin"),
+    ("Gaige (Mechromancer)", "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer"),
+    ("Krieg (Psycho)", "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"),
+];
 
 /// One selectable part in a parts picker.
 #[derive(Clone, Debug)]
@@ -334,6 +406,19 @@ mod tests {
     }
 
     #[test]
+    fn character_edits() {
+        let mut s = SaveFile { proto: synthetic_proto() };
+        s.set_skill_points(7).unwrap(); // field 4 absent in synthetic → appended
+        assert_eq!(s.skill_points(), Some(7));
+        s.set_class("GD_Siren.Character.CharClass_Siren").unwrap();
+        assert_eq!(s.class_name().as_deref(), Some("Maya (Siren)"));
+        assert_eq!(s.class_def().as_deref(), Some("GD_Siren.Character.CharClass_Siren"));
+        // Other fields untouched.
+        assert_eq!(s.level(), Some(4));
+        assert_eq!(s.money(), 608);
+    }
+
+    #[test]
     fn full_edit_still_encodes_and_self_verifies() {
         let mut s = SaveFile { proto: synthetic_proto() };
         s.set_money(12_345).unwrap();
@@ -432,6 +517,16 @@ mod tests {
             let pr = after.iter().find(|x| x.id == it.id).unwrap().serial.parts[slot].unwrap();
             assert_eq!((pr.lib, pr.asset), (choice.lib, choice.asset), "slot holds chosen part");
             eprintln!("golden: swapped part slot {slot} to {}", choice.name);
+        }
+
+        // Name editing (appearance sub-field) on the real save.
+        if save.name().is_some() {
+            let mut n = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+            n.set_name("Zer0edit").expect("set_name");
+            let _ = n.to_bytes().expect("name edit self-verify");
+            assert_eq!(n.name().as_deref(), Some("Zer0edit"));
+            assert_eq!(n.money(), save.money(), "name edit must not touch money");
+            eprintln!("golden: renamed to {:?}", n.name());
         }
     }
 }

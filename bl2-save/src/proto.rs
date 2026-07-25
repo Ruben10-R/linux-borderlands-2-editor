@@ -14,7 +14,9 @@ use crate::error::{Result, SaveError};
 pub const FIELD_CLASS: u64 = 1; // PlayerClassDefinition path (string)
 pub const FIELD_LEVEL: u64 = 2; // experience level (varint)
 pub const FIELD_XP: u64 = 3; // experience points (varint)
+pub const FIELD_SKILL_POINTS: u64 = 4; // available skill points (varint)
 pub const FIELD_CURRENCY: u64 = 6; // currency_on_hand (packed repeated int32)
+pub const FIELD_APPEARANCE: u64 = 19; // appearance message; sub-field 1 = name (string)
 
 pub const IDX_MONEY: usize = 0;
 pub const IDX_ERIDIUM: usize = 1;
@@ -288,6 +290,51 @@ pub fn rewrite_varint_field(
         }
     }
     Ok(out)
+}
+
+/// Rebuild the message with the first wire-2 field `number` set to `new_value`
+/// (a UTF-8 string), copying every other field byte-for-byte. Errors if absent.
+pub fn rewrite_string_field(
+    buf: &[u8],
+    fields: &[Field],
+    number: u64,
+    new_value: &str,
+) -> Result<Vec<u8>> {
+    if !fields.iter().any(|f| f.number == number && f.wire_type == 2) {
+        return Err(SaveError::Proto(format!("string field {number} not present")));
+    }
+    let mut out = Vec::with_capacity(buf.len());
+    let mut done = false;
+    for f in fields {
+        if !done && f.number == number && f.wire_type == 2 {
+            emit_wire2_field(&mut out, number, new_value.as_bytes());
+            done = true;
+        } else {
+            out.extend_from_slice(&buf[f.tag_start..f.end]);
+        }
+    }
+    Ok(out)
+}
+
+/// Set a top-level varint field, or append it if absent (protobuf order is not
+/// significant). Copies every other field byte-for-byte.
+pub fn upsert_varint_field(buf: &[u8], fields: &[Field], number: u64, value: i64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(buf.len() + 4);
+    let mut done = false;
+    for f in fields {
+        if !done && f.number == number && f.wire_type == 0 {
+            encode_varint(&mut out, (number << 3) | 0);
+            encode_varint(&mut out, value as u64);
+            done = true;
+        } else {
+            out.extend_from_slice(&buf[f.tag_start..f.end]);
+        }
+    }
+    if !done {
+        encode_varint(&mut out, (number << 3) | 0);
+        encode_varint(&mut out, value as u64);
+    }
+    out
 }
 
 /// Confirm the only top-level fields that differ between two messages are those

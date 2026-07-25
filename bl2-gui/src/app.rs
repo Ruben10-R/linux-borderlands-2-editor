@@ -46,7 +46,9 @@ struct Doc {
     /// where it is unused (the web build downloads instead of writing).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     path: Option<PathBuf>,
-    class: String,
+    char_name: String,
+    class_def: String,
+    skill_points: i64,
     money: i64,
     eridium: i64,
     seraph: i64,
@@ -155,7 +157,9 @@ impl App {
         match SaveFile::from_bytes(bytes) {
             Ok(s) => {
                 self.doc = Some(Doc {
-                    class: s.class_name().unwrap_or_else(|| "Unknown".into()),
+                    char_name: s.name().unwrap_or_default(),
+                    class_def: s.class_def().unwrap_or_default(),
+                    skill_points: s.skill_points().unwrap_or(0),
                     level: s.level().unwrap_or(0),
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
@@ -237,6 +241,14 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_torgue(doc.torgue.clamp(0, MAX))?;
     doc.save.set_level(doc.level.clamp(0, MAX))?;
     doc.save.set_xp(doc.xp.clamp(0, MAX))?;
+    doc.save.set_skill_points(doc.skill_points.clamp(0, MAX))?;
+    // Class + name are best-effort (a stray save might lack those fields).
+    if !doc.class_def.is_empty() {
+        let _ = doc.save.set_class(&doc.class_def);
+    }
+    if !doc.char_name.is_empty() {
+        let _ = doc.save.set_name(&doc.char_name);
+    }
     Ok(())
 }
 
@@ -342,16 +354,21 @@ impl eframe::App for App {
                 ui.colored_label(col, msg);
             }
 
-            // Tab bar.
+            // Tab bar (each tab gets an original glyph in its state colour).
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 for t in Tab::ALL {
-                    let label = egui::RichText::new(t.label())
-                        .color(if self.tab == t { accent } else { text })
-                        .strong();
+                    let col = if self.tab == t { accent } else { text };
+                    match t {
+                        Tab::Character => theme::head(ui, 16.0, col),
+                        Tab::Currency => theme::coin(ui, 16.0),
+                        Tab::Items => theme::crate_icon(ui, 16.0, col),
+                    }
+                    let label = egui::RichText::new(t.label()).color(col).strong();
                     if ui.selectable_label(self.tab == t, label).clicked() {
                         self.tab = t;
                     }
+                    ui.add_space(10.0);
                 }
             });
             ui.separator();
@@ -449,18 +466,42 @@ impl App {
     }
 }
 
-/// Character tab: file, class, level, XP.
+/// Character tab: file, name, class, level, XP, skill points.
 fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     egui::Grid::new("character").num_columns(2).spacing([24.0, 8.0]).striped(true).show(ui, |ui| {
         field(ui, "File", &doc.name, accent);
-        field(ui, "Class", &doc.class, accent);
+
+        key(ui, "Name", accent);
+        ui.text_edit_singleline(&mut doc.char_name);
+        ui.end_row();
+
+        key(ui, "Class", accent);
+        let current = bl2_save::CLASSES
+            .iter()
+            .find(|(_, path)| *path == doc.class_def)
+            .map(|(disp, _)| *disp)
+            .unwrap_or("(unknown)");
+        egui::ComboBox::from_id_salt("class_combo").selected_text(current).show_ui(ui, |ui| {
+            for (disp, path) in bl2_save::CLASSES {
+                if ui.selectable_label(doc.class_def == path, disp).clicked() {
+                    doc.class_def = path.to_string();
+                }
+            }
+        });
+        ui.end_row();
+
         key(ui, "Level", accent);
         edit_number(ui, &mut doc.level, 1.0);
         ui.end_row();
         key(ui, "XP", accent);
         edit_number(ui, &mut doc.xp, 1000.0);
         ui.end_row();
+        key(ui, "Skill Points", accent);
+        edit_number(ui, &mut doc.skill_points, 1.0);
+        ui.end_row();
     });
+    ui.add_space(4.0);
+    ui.weak("Changing class does not reset skills — level/skill mismatch may look odd in-game.");
 }
 
 /// Currency tab: money, eridium (seraph/torgue coming next slice).
@@ -479,10 +520,16 @@ fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         });
         ui.end_row();
         key(ui, "Seraph Crystals", accent);
-        edit_number(ui, &mut doc.seraph, 1.0);
+        ui.horizontal(|ui| {
+            theme::seraph(ui, 16.0);
+            edit_number(ui, &mut doc.seraph, 1.0);
+        });
         ui.end_row();
         key(ui, "Torgue Tokens", accent);
-        edit_number(ui, &mut doc.torgue, 1.0);
+        ui.horizontal(|ui| {
+            theme::torgue(ui, 16.0);
+            edit_number(ui, &mut doc.torgue, 1.0);
+        });
         ui.end_row();
     });
 }

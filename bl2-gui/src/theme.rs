@@ -155,3 +155,75 @@ pub fn eridium(ui: &mut egui::Ui, size: f32) {
     ];
     p.add(Shape::convex_polygon(gem, GEM, Stroke::new(size * 0.11, OUTLINE)));
 }
+
+const SERAPH_RED: Color32 = Color32::from_rgb(0xE0, 0x3A, 0x55); // crimson
+const TORGUE_ORANGE: Color32 = Color32::from_rgb(0xF0, 0x7A, 0x1E);
+
+/// A crimson crystal glyph for seraph crystals.
+pub fn seraph(ui: &mut egui::Ui, size: f32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let r = size * 0.46;
+    let gem = vec![
+        Pos2::new(c.x, c.y - r),
+        Pos2::new(c.x + r * 0.55, c.y - r * 0.15),
+        Pos2::new(c.x, c.y + r),
+        Pos2::new(c.x - r * 0.55, c.y - r * 0.15),
+    ];
+    p.add(Shape::convex_polygon(gem, SERAPH_RED, Stroke::new(size * 0.11, OUTLINE)));
+    p.line_segment(
+        [Pos2::new(c.x, c.y - r), Pos2::new(c.x, c.y + r)],
+        Stroke::new(size * 0.06, OUTLINE),
+    );
+}
+
+/// An orange token glyph for torgue tokens.
+pub fn torgue(ui: &mut egui::Ui, size: f32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let r = size * 0.45;
+    p.circle(c, r, TORGUE_ORANGE, Stroke::new(size * 0.11, OUTLINE));
+    p.circle_stroke(c, r * 0.5, Stroke::new(size * 0.10, OUTLINE));
+}
+
+/// A head/shoulders bust glyph for the Character tab (uses the given color).
+pub fn head(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    p.circle(
+        Pos2::new(c.x, c.y - size * 0.16),
+        size * 0.20,
+        color,
+        Stroke::new(size * 0.09, OUTLINE),
+    );
+    let w = size * 0.36;
+    let shoulders = vec![
+        Pos2::new(c.x - w, c.y + size * 0.42),
+        Pos2::new(c.x - w * 0.55, c.y + size * 0.10),
+        Pos2::new(c.x + w * 0.55, c.y + size * 0.10),
+        Pos2::new(c.x + w, c.y + size * 0.42),
+    ];
+    p.add(Shape::convex_polygon(shoulders, color, Stroke::new(size * 0.09, OUTLINE)));
+}
+
+/// A loot-crate glyph for the Items tab (uses the given color).
+pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let h = size * 0.34;
+    let square = vec![
+        Pos2::new(c.x - h, c.y - h),
+        Pos2::new(c.x + h, c.y - h),
+        Pos2::new(c.x + h, c.y + h),
+        Pos2::new(c.x - h, c.y + h),
+    ];
+    p.add(Shape::convex_polygon(square, color, Stroke::new(size * 0.10, OUTLINE)));
+    let d = h * 0.62;
+    let diamond = vec![
+        Pos2::new(c.x, c.y - d),
+        Pos2::new(c.x + d, c.y),
+        Pos2::new(c.x, c.y + d),
+        Pos2::new(c.x - d, c.y),
+    ];
+    p.add(Shape::convex_polygon(diamond, OUTLINE, Stroke::new(1.0_f32, OUTLINE)));
+}
