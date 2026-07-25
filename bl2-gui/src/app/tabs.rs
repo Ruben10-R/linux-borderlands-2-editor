@@ -512,9 +512,16 @@ pub(super) fn items_tab(
     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
         egui::Grid::new("items_grid")
             .num_columns(5)
-            .spacing([16.0, 4.0])
+            .spacing([22.0, 6.0])
+            .min_col_width(56.0)
             .striped(true)
             .show(ui, |ui| {
+                // Column headers.
+                for h in ["Kind", "Level", "Name", "", ""] {
+                    ui.label(egui::RichText::new(h).color(accent).strong().size(13.0));
+                }
+                ui.end_row();
+
                 for v in doc.items.iter_mut().filter(|v| v.is_bank == show_bank) {
                     let (kcol, kind) = if v.is_weapon { (accent, "weapon") } else { (text, "item") };
                     ui.label(egui::RichText::new(kind).color(kcol).strong());
@@ -530,8 +537,13 @@ pub(super) fn items_tab(
                             );
                         });
                     }
-                    ui.label(egui::RichText::new(&v.display).strong())
-                        .on_hover_text(format!("{}\n{}", v.name, v.details));
+                    // Give the name column a bit of fixed room so the table is
+                    // comfortably wide (not hugging the text).
+                    ui.add_sized(
+                        [220.0, 18.0],
+                        egui::Label::new(egui::RichText::new(&v.display).strong()).truncate(),
+                    )
+                    .on_hover_text(format!("{}\n{}", v.name, v.details));
                     if ui.small_button("Parts").clicked() {
                         open_parts = Some(v.id);
                     }

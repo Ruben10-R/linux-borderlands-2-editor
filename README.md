@@ -139,10 +139,24 @@ cp profile.bin profile.bin.backup
 - `./run.sh <cargo args>` — run cargo in the `rust:1` container (CLI + core lib + tests).
 - `./run.sh test` — run the test suite.
 - `./build-native.sh` — release binaries for the desktop app + CLI into `./dist/`.
+- `./build-windows.sh` — cross-compile the Windows `.exe` app + CLI into `./dist/`.
 - `docker compose up` — serve the web build at `localhost:8080`.
 
 The native GUI is excluded from the default cargo build (it needs GL/X11 libs);
 `build-native.sh` provides those via `docker/native.Dockerfile`.
+
+## Releases & updating
+
+Push a version tag and GitHub Actions (`.github/workflows/release.yml`) builds
+and publishes downloadable binaries for Linux, Windows, and the web:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+To **update**, download the newest archive from the repo's Releases page and
+replace your old copy — no rebuild needed. (Building from source? `git pull`
+then `./build-native.sh`.)
 
 ### Layout
 - `bl2-save/` — core library: save/profile codec, item serials, GameInfo data, all edits.

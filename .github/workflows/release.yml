@@ -1,0 +1,124 @@
+name: Release
+
+# Push a version tag to cut a release, e.g.:
+#   git tag v0.2.0 && git push origin v0.2.0
+# This builds the Linux + Windows desktop apps (and CLI) and the web/WASM
+# bundle, then publishes them as a GitHub Release users can download.
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # The desktop GUI links against OpenGL / X11 / Wayland / GTK (file dialogs).
+      - name: System libraries for the native GUI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libgtk-3-dev libxkbcommon-dev libwayland-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build release binaries
+        run: cargo build --release -p bl2-gui -p bl2-cli
+
+      - name: Package
+        run: |
+          mkdir -p out
+          cp target/release/bl2-gui out/bl2-editor
+          cp target/release/bl2edit out/bl2edit
+          chmod +x out/bl2-editor out/bl2edit
+          tar -czf bl2edit-linux-x86_64.tar.gz -C out bl2-editor bl2edit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: bl2edit-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binaries
+        run: cargo build --release -p bl2-gui -p bl2-cli
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item target/release/bl2-gui.exe out/bl2-editor.exe
+          Copy-Item target/release/bl2edit.exe out/bl2edit.exe
+          Compress-Archive -Path out/* -DestinationPath bl2edit-windows-x86_64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: bl2edit-windows-x86_64.zip
+
+  web:
+    name: Web (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install trunk
+        run: |
+          curl -sSfL https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz \
+            | sudo tar -xzf - -C /usr/local/bin trunk
+
+      - name: Build web bundle
+        working-directory: bl2-gui
+        run: trunk build --release
+
+      # Trunk.toml writes the bundle to /tmp/bl2-gui-dist.
+      - name: Package
+        run: tar -czf bl2edit-web.tar.gz -C /tmp/bl2-gui-dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: bl2edit-web.tar.gz
+
+  publish:
+    name: Publish GitHub Release
+    needs: [linux, windows, web]
+    runs-on: ubuntu-latest
+    # Allow the workflow to create the release + upload assets.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Unofficial Borderlands 2 save + profile editor — download for your platform:
+
+            - **Linux** — `bl2edit-linux-x86_64.tar.gz` → extract, run `./bl2-editor` (GUI) or `./bl2edit` (CLI).
+            - **Windows** — `bl2edit-windows-x86_64.zip` → extract, run `bl2-editor.exe` (GUI) or `bl2edit.exe` (CLI).
+            - **Web** — `bl2edit-web.tar.gz` → static files; serve them from any web host.
+
+            To update, download the new archive and replace your old copy. Always back up your saves first.
