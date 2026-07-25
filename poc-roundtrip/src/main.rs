@@ -35,7 +35,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         // If the first arg looks like a path, treat it as roundtrip <path>.
         other if other.ends_with(".sav") => cmd_roundtrip(other),
-        other => Err(format!("unknown command '{other}' (roundtrip|dump|info|set-currency)").into()),
+        other => {
+            Err(format!("unknown command '{other}' (roundtrip|dump|info|set-currency)").into())
+        }
     }
 }
 
@@ -63,7 +65,10 @@ fn cmd_roundtrip(path: &str) -> Result<(), Box<dyn Error>> {
     println!("  WSG version              : {}", d.version);
     println!("  outer SHA1 matches file  : {}", yn(d.sha_ok));
     println!("  protobuf bytes decoded   : {}", d.proto.len());
-    println!("  CRC32 stored / computed  : {:#010x} / {:#010x}", d.crc_stored, d.crc_calc);
+    println!(
+        "  CRC32 stored / computed  : {:#010x} / {:#010x}",
+        d.crc_stored, d.crc_calc
+    );
     let a_ok = d.is_valid();
     println!("  => decode matches game   : {}", yn(a_ok));
 
@@ -107,8 +112,15 @@ fn cmd_dump(path: &str) -> Result<(), Box<dyn Error>> {
     let lzo = LZO::init()?;
     let d = load_proto(path, &lzo)?;
     let fields = proto::parse_fields(&d.proto)?;
-    println!("== {} : {} top-level protobuf fields ==", path, fields.len());
-    println!("  {:>5}  {:>4}  {:>8}  value/notes", "field", "wire", "size");
+    println!(
+        "== {} : {} top-level protobuf fields ==",
+        path,
+        fields.len()
+    );
+    println!(
+        "  {:>5}  {:>4}  {:>8}  value/notes",
+        "field", "wire", "size"
+    );
     for f in &fields {
         let size = f.end - f.val_start;
         let note = match f.wire_type {
@@ -119,17 +131,22 @@ fn cmd_dump(path: &str) -> Result<(), Box<dyn Error>> {
             2 => {
                 let (len, adv) = peek_varint(&d.proto, f.val_start);
                 let content = &d.proto[f.val_start + adv..f.val_start + adv + len as usize];
-                let printable =
-                    content.iter().all(|&c| c == 0 || (0x20..0x7f).contains(&c));
+                let printable = content.iter().all(|&c| c == 0 || (0x20..0x7f).contains(&c));
                 if printable && !content.is_empty() {
-                    format!("\"{}\"", String::from_utf8_lossy(content).replace('\0', "\\0"))
+                    format!(
+                        "\"{}\"",
+                        String::from_utf8_lossy(content).replace('\0', "\\0")
+                    )
                 } else {
                     format!("({} bytes)", content.len())
                 }
             }
             _ => String::new(),
         };
-        println!("  {:>5}  {:>4}  {:>8}  {}", f.number, f.wire_type, size, note);
+        println!(
+            "  {:>5}  {:>4}  {:>8}  {}",
+            f.number, f.wire_type, size, note
+        );
     }
     Ok(())
 }
@@ -185,15 +202,22 @@ fn cmd_set_currency(
     if !check.is_valid() || check.proto != new_proto {
         return Err("re-encoded file failed self-check".into());
     }
-    let check_currency =
-        proto::read_currency(&check.proto, &proto::parse_fields(&check.proto)?)?;
+    let check_currency = proto::read_currency(&check.proto, &proto::parse_fields(&check.proto)?)?;
 
     fs::write(output, &file)?;
 
     println!("== set-currency ==");
     println!("  input   : {input}");
-    println!("  money   : {} -> {}", old.first().copied().unwrap_or(0), money);
-    println!("  eridium : {} -> {}", old.get(1).copied().unwrap_or(0), eridium);
+    println!(
+        "  money   : {} -> {}",
+        old.first().copied().unwrap_or(0),
+        money
+    );
+    println!(
+        "  eridium : {} -> {}",
+        old.get(1).copied().unwrap_or(0),
+        eridium
+    );
     println!(
         "  verify  : non-currency bytes unchanged, re-decode valid, currency now {check_currency:?}"
     );
@@ -223,5 +247,9 @@ fn verify_only_currency_changed(old: &[u8], new: &[u8]) -> Result<(), Box<dyn Er
 }
 
 fn yn(b: bool) -> &'static str {
-    if b { "YES" } else { "NO" }
+    if b {
+        "YES"
+    } else {
+        "NO"
+    }
 }

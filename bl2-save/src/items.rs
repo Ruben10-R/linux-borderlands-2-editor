@@ -56,7 +56,12 @@ pub fn read_items(protobuf: &[u8]) -> Result<Vec<Item>> {
             .iter()
             .find(|x| x.number == 2 && x.wire_type == 0)
             .and_then(|q| proto::read_varint_value(entry, q.val_start));
-        out.push(Item { id: this_id, location, serial, quantity });
+        out.push(Item {
+            id: this_id,
+            location,
+            serial,
+            quantity,
+        });
     }
     Ok(out)
 }
@@ -319,7 +324,10 @@ pub(crate) fn raw_serials(protobuf: &[u8]) -> Result<Vec<Vec<u8>>> {
             continue;
         }
         let entry = proto::wire2_content(protobuf, f)?;
-        for sf in proto::parse_fields(entry)?.iter().filter(|x| x.number == 1 && x.wire_type == 2) {
+        for sf in proto::parse_fields(entry)?
+            .iter()
+            .filter(|x| x.number == 1 && x.wire_type == 2)
+        {
             out.push(proto::wire2_content(entry, sf)?.to_vec());
         }
     }
@@ -341,7 +349,10 @@ mod tests {
         let got = serial_by_id(&proto, 0).unwrap().expect("serial by id");
         // re-decode: same weapon/item kind as the source code
         assert_eq!(serial::unwrap(&got).unwrap().is_weapon, is_weapon);
-        assert!(serial_by_id(&proto, 9).unwrap().is_none(), "missing id -> None");
+        assert!(
+            serial_by_id(&proto, 9).unwrap().is_none(),
+            "missing id -> None"
+        );
     }
 
     #[test]
@@ -353,6 +364,9 @@ mod tests {
         let p2 = set_op_level(&p, 7).unwrap();
         assert_eq!(read_op_level(&p2).unwrap(), Some(7));
         // updating didn't append a second virtual item
-        assert_eq!(read_items(&p2).unwrap().len(), read_items(&p).unwrap().len());
+        assert_eq!(
+            read_items(&p2).unwrap().len(),
+            read_items(&p).unwrap().len()
+        );
     }
 }

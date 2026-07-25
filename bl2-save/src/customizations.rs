@@ -59,12 +59,16 @@ pub fn class_token(class_def: &str) -> Option<&'static str> {
         ("Lilac", "Psycho"),
         ("Psycho", "Psycho"),
     ];
-    MAP.iter().find(|(needle, _)| class_def.contains(needle)).map(|(_, tok)| *tok)
+    MAP.iter()
+        .find(|(needle, _)| class_def.contains(needle))
+        .map(|(_, tok)| *tok)
 }
 
 /// Every head (or skin) usable by the given class, sorted by display name.
 pub fn for_class(class_def: &str, is_head: bool) -> Vec<Customization> {
-    let Some(token) = class_token(class_def) else { return Vec::new() };
+    let Some(token) = class_token(class_def) else {
+        return Vec::new();
+    };
     let mut out: Vec<Customization> = all()
         .iter()
         .filter(|c| c.is_head == is_head && c.classes.iter().any(|t| t == token))
@@ -76,13 +80,20 @@ pub fn for_class(class_def: &str, is_head: bool) -> Vec<Customization> {
 
 /// Display name for an equipped head/skin path, if known.
 pub fn name(path: &str) -> Option<&'static str> {
-    all().iter().find(|c| c.path == path).map(|c| c.name.as_str())
+    all()
+        .iter()
+        .find(|c| c.path == path)
+        .map(|c| c.name.as_str())
 }
 
 /// The stock "Default" head/skin path for a class (a safe reset target).
 pub fn default_path(class_def: &str, is_head: bool) -> Option<String> {
     let token = class_token(class_def)?;
-    let kind = if is_head { "Head_Default" } else { "Skin_Default" };
+    let kind = if is_head {
+        "Head_Default"
+    } else {
+        "Skin_Default"
+    };
     Some(format!("GD_DefaultCustoms_MainGame.{token}.{kind}"))
 }
 
@@ -92,10 +103,22 @@ mod tests {
 
     #[test]
     fn class_tokens_map_correctly() {
-        assert_eq!(class_token("GD_Assassin.Character.CharClass_Assassin"), Some("Assassin"));
-        assert_eq!(class_token("GD_Siren.Character.CharClass_Siren"), Some("Siren"));
-        assert_eq!(class_token("GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"), Some("Psycho"));
-        assert_eq!(class_token("GD_Tulip_Mechromancer.Character.X"), Some("Mechromancer"));
+        assert_eq!(
+            class_token("GD_Assassin.Character.CharClass_Assassin"),
+            Some("Assassin")
+        );
+        assert_eq!(
+            class_token("GD_Siren.Character.CharClass_Siren"),
+            Some("Siren")
+        );
+        assert_eq!(
+            class_token("GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"),
+            Some("Psycho")
+        );
+        assert_eq!(
+            class_token("GD_Tulip_Mechromancer.Character.X"),
+            Some("Mechromancer")
+        );
         assert!(class_token("nonsense").is_none());
     }
 
@@ -107,6 +130,8 @@ mod tests {
         assert!(heads.iter().all(|c| c.is_head));
         assert!(skins.iter().all(|c| !c.is_head));
         assert!(name(&heads[0].path).is_some());
-        assert!(default_path("GD_Siren.Character.CharClass_Siren", true).unwrap().contains("Head_Default"));
+        assert!(default_path("GD_Siren.Character.CharClass_Siren", true)
+            .unwrap()
+            .contains("Head_Default"));
     }
 }

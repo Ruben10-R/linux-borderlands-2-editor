@@ -81,21 +81,31 @@ pub fn parse_fields(buf: &[u8]) -> Result<Vec<Field>, Box<dyn Error>> {
         if pos > buf.len() {
             return Err("field value runs past end of buffer".into());
         }
-        fields.push(Field { number, wire_type, tag_start, val_start, end: pos });
+        fields.push(Field {
+            number,
+            wire_type,
+            tag_start,
+            val_start,
+            end: pos,
+        });
     }
     Ok(fields)
 }
 
 /// Read the first varint field with the given number (e.g. level=2, xp=3).
 pub fn read_varint_field(buf: &[u8], fields: &[Field], number: u64) -> Option<i64> {
-    let f = fields.iter().find(|f| f.number == number && f.wire_type == 0)?;
+    let f = fields
+        .iter()
+        .find(|f| f.number == number && f.wire_type == 0)?;
     let mut p = f.val_start;
     read_varint(buf, &mut p).ok().map(|v| v as i64)
 }
 
 /// Read the first length-delimited field as a UTF-8 string (e.g. class=1).
 pub fn read_string_field(buf: &[u8], fields: &[Field], number: u64) -> Option<String> {
-    let f = fields.iter().find(|f| f.number == number && f.wire_type == 2)?;
+    let f = fields
+        .iter()
+        .find(|f| f.number == number && f.wire_type == 2)?;
     let mut p = f.val_start;
     let len = read_varint(buf, &mut p).ok()? as usize;
     Some(String::from_utf8_lossy(&buf[p..p + len]).into_owned())

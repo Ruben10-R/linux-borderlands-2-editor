@@ -40,7 +40,11 @@ struct BitWriter {
 }
 impl BitWriter {
     fn new() -> Self {
-        Self { bytes: Vec::new(), cur: 0, nbits: 0 }
+        Self {
+            bytes: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
     fn write_bit(&mut self, bit: u8) {
         self.cur = (self.cur << 1) | (bit & 1);
@@ -120,7 +124,11 @@ fn huffman_decode(data: &[u8], out_len: usize) -> Vec<u8> {
 fn build_codes(node: &Node, prefix: &mut Vec<u8>, table: &mut Vec<Vec<u8>>) {
     match node {
         Node::Leaf(v) => {
-            table[*v as usize] = if prefix.is_empty() { vec![0] } else { prefix.clone() };
+            table[*v as usize] = if prefix.is_empty() {
+                vec![0]
+            } else {
+                prefix.clone()
+            };
         }
         Node::Internal(l, r) => {
             prefix.push(0);
@@ -168,7 +176,11 @@ fn huffman_encode(data: &[u8]) -> Vec<u8> {
     let mut seq = 0usize;
     for b in 0..256 {
         if freq[b] > 0 {
-            heap.push(Entry { freq: freq[b], seq, node: Box::new(Node::Leaf(b as u8)) });
+            heap.push(Entry {
+                freq: freq[b],
+                seq,
+                node: Box::new(Node::Leaf(b as u8)),
+            });
             seq += 1;
         }
     }
@@ -267,7 +279,13 @@ pub fn decode(raw: &[u8], lzo: &LZO) -> Result<Decoded, Box<dyn Error>> {
     }
     let crc_calc = crc32(&proto);
 
-    Ok(Decoded { proto, crc_stored, crc_calc, version, sha_ok })
+    Ok(Decoded {
+        proto,
+        crc_stored,
+        crc_calc,
+        version,
+        sha_ok,
+    })
 }
 
 /// Encode protobuf bytes back into a full .sav (reverse pipeline).

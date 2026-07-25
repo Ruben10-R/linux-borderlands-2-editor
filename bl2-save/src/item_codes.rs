@@ -51,7 +51,11 @@ pub fn code_library() -> &'static [LibraryItem] {
 /// The distinct categories present in the library, in a sensible order.
 pub fn library_categories() -> Vec<&'static str> {
     const ORDER: [&str; 6] = ["Weapon", "Shield", "Grenade", "Class Mod", "Relic", "Item"];
-    ORDER.iter().copied().filter(|c| code_library().iter().any(|e| e.category == *c)).collect()
+    ORDER
+        .iter()
+        .copied()
+        .filter(|c| code_library().iter().any(|e| e.category == *c))
+        .collect()
 }
 
 #[cfg(test)]
@@ -62,7 +66,9 @@ mod tests {
     fn library_loads_all_categories() {
         let lib = code_library();
         assert!(lib.len() > 1000, "library populated");
-        assert!(lib.iter().all(|e| e.code.starts_with("BL2(") && e.code.ends_with(')')));
+        assert!(lib
+            .iter()
+            .all(|e| e.code.starts_with("BL2(") && e.code.ends_with(')')));
         let cats = library_categories();
         for c in ["Weapon", "Shield", "Grenade", "Class Mod", "Relic"] {
             assert!(cats.contains(&c), "category {c} present");

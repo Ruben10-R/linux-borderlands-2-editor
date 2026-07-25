@@ -41,7 +41,11 @@ struct BitWriter {
 }
 impl BitWriter {
     fn new() -> Self {
-        Self { bytes: Vec::new(), cur: 0, nbits: 0 }
+        Self {
+            bytes: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
     fn write_bit(&mut self, bit: u8) {
         self.cur = (self.cur << 1) | (bit & 1);
@@ -121,7 +125,11 @@ fn huffman_decode(data: &[u8], out_len: usize) -> Vec<u8> {
 fn build_codes(node: &Node, prefix: &mut Vec<u8>, table: &mut [Vec<u8>]) {
     match node {
         Node::Leaf(v) => {
-            table[*v as usize] = if prefix.is_empty() { vec![0] } else { prefix.clone() };
+            table[*v as usize] = if prefix.is_empty() {
+                vec![0]
+            } else {
+                prefix.clone()
+            };
         }
         Node::Internal(l, r) => {
             prefix.push(0);
@@ -169,7 +177,11 @@ fn huffman_encode(data: &[u8]) -> Vec<u8> {
     let mut seq = 0usize;
     for b in 0..256 {
         if freq[b] > 0 {
-            heap.push(Entry { freq: freq[b], seq, node: Box::new(Node::Leaf(b as u8)) });
+            heap.push(Entry {
+                freq: freq[b],
+                seq,
+                node: Box::new(Node::Leaf(b as u8)),
+            });
             seq += 1;
         }
     }
@@ -287,7 +299,12 @@ pub fn decode(raw: &[u8]) -> Result<Decoded> {
     }
     let crc_calc = crc32(&proto);
 
-    Ok(Decoded { proto, crc_stored, crc_calc, sha_ok })
+    Ok(Decoded {
+        proto,
+        crc_stored,
+        crc_calc,
+        sha_ok,
+    })
 }
 
 /// Encode protobuf bytes back into a full `.sav` (reverse pipeline).
@@ -310,8 +327,8 @@ pub fn encode(proto: &[u8]) -> Result<Vec<u8>> {
     outer.extend_from_slice(&(wsg.len() as u32).to_be_bytes());
     outer.extend_from_slice(&wsg);
 
-    let compressed = lzokay_native::compress(&outer)
-        .map_err(|e| SaveError::Lzo(format!("compress: {e}")))?;
+    let compressed =
+        lzokay_native::compress(&outer).map_err(|e| SaveError::Lzo(format!("compress: {e}")))?;
 
     let mut body = Vec::new();
     body.extend_from_slice(&(outer.len() as u32).to_be_bytes());

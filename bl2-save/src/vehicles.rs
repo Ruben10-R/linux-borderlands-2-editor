@@ -90,15 +90,27 @@ pub fn skins_for(token: &str) -> &'static [VehicleSkin] {
 
 /// Display name for an equipped skin path, if known.
 pub fn skin_name(path: &str) -> Option<&'static str> {
-    db().values().flatten().find(|s| s.path == path).map(|s| s.name.as_str())
+    db().values()
+        .flatten()
+        .find(|s| s.path == path)
+        .map(|s| s.name.as_str())
 }
 
 /// The chosen skins for a family (from field 57's matching entry).
 pub fn family_skins(protobuf: &[u8], family_path: &str) -> Vec<String> {
-    let Ok(fields) = proto::parse_fields(protobuf) else { return Vec::new() };
-    for f in fields.iter().filter(|f| f.number == FIELD_VEHICLE && f.wire_type == 2) {
-        let Ok(entry) = proto::wire2_content(protobuf, f) else { continue };
-        let Ok(ifields) = proto::parse_fields(entry) else { continue };
+    let Ok(fields) = proto::parse_fields(protobuf) else {
+        return Vec::new();
+    };
+    for f in fields
+        .iter()
+        .filter(|f| f.number == FIELD_VEHICLE && f.wire_type == 2)
+    {
+        let Ok(entry) = proto::wire2_content(protobuf, f) else {
+            continue;
+        };
+        let Ok(ifields) = proto::parse_fields(entry) else {
+            continue;
+        };
         if proto::read_string_field(entry, &ifields, 1).as_deref() != Some(family_path) {
             continue;
         }
@@ -106,7 +118,10 @@ pub fn family_skins(protobuf: &[u8], family_path: &str) -> Vec<String> {
             .iter()
             .filter(|x| x.number == 2 && x.wire_type == 2)
             .filter_map(|x| {
-                proto::wire2_content(entry, x).ok().and_then(|c| std::str::from_utf8(c).ok()).map(str::to_string)
+                proto::wire2_content(entry, x)
+                    .ok()
+                    .and_then(|c| std::str::from_utf8(c).ok())
+                    .map(str::to_string)
             })
             .collect();
     }
@@ -116,7 +131,10 @@ pub fn family_skins(protobuf: &[u8], family_path: &str) -> Vec<String> {
 /// Rewrite a family's chosen skins (drops empty/"None"). Returns the new proto;
 /// only field 57 changes.
 pub fn set_family_skins(protobuf: &[u8], family_path: &str, skins: &[String]) -> Result<Vec<u8>> {
-    let keep: Vec<&String> = skins.iter().filter(|s| !s.is_empty() && *s != "None").collect();
+    let keep: Vec<&String> = skins
+        .iter()
+        .filter(|s| !s.is_empty() && *s != "None")
+        .collect();
     let mut new_entry = Vec::new();
     if !keep.is_empty() {
         proto::emit_wire2_field(&mut new_entry, 1, family_path.as_bytes());

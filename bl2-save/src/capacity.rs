@@ -46,7 +46,9 @@ fn write_packed(values: &[u64]) -> Vec<u8> {
 /// Current backpack slot count (field 13 → sub-field 1), if present.
 pub fn backpack_size(protobuf: &[u8]) -> Option<i64> {
     let fields = proto::parse_fields(protobuf).ok()?;
-    let f = fields.iter().find(|f| f.number == FIELD_SIZES && f.wire_type == 2)?;
+    let f = fields
+        .iter()
+        .find(|f| f.number == FIELD_SIZES && f.wire_type == 2)?;
     let content = proto::wire2_content(protobuf, f).ok()?;
     let sub = proto::parse_fields(content).ok()?;
     proto::read_varint_field(content, &sub, 1)
@@ -64,7 +66,10 @@ pub fn bank_size(protobuf: &[u8]) -> i64 {
 /// No-op (returns the input) if field 36 is absent.
 fn set_black_market_sdu(protobuf: &[u8], idx: usize, sdu: u64) -> Result<Vec<u8>> {
     let fields = proto::parse_fields(protobuf)?;
-    let Some(f) = fields.iter().find(|f| f.number == FIELD_BLACK_MARKET && f.wire_type == 2) else {
+    let Some(f) = fields
+        .iter()
+        .find(|f| f.number == FIELD_BLACK_MARKET && f.wire_type == 2)
+    else {
         return Ok(protobuf.to_vec());
     };
     let content = proto::wire2_content(protobuf, f)?;
@@ -73,7 +78,12 @@ fn set_black_market_sdu(protobuf: &[u8], idx: usize, sdu: u64) -> Result<Vec<u8>
         packed.push(0);
     }
     packed[idx] = sdu;
-    Ok(proto::replace_field_content(protobuf, &fields, FIELD_BLACK_MARKET, &write_packed(&packed)))
+    Ok(proto::replace_field_content(
+        protobuf,
+        &fields,
+        FIELD_BLACK_MARKET,
+        &write_packed(&packed),
+    ))
 }
 
 /// Set backpack capacity to (at least) `slots`, snapped to the SDU grid.
@@ -84,7 +94,10 @@ pub fn set_backpack_size(protobuf: &[u8], slots: i64) -> Result<Vec<u8>> {
 
     // 1. field 13 sub-field 1 = new_size
     let fields = proto::parse_fields(protobuf)?;
-    let out = if let Some(f) = fields.iter().find(|f| f.number == FIELD_SIZES && f.wire_type == 2) {
+    let out = if let Some(f) = fields
+        .iter()
+        .find(|f| f.number == FIELD_SIZES && f.wire_type == 2)
+    {
         let content = proto::wire2_content(protobuf, f)?;
         let sub = proto::parse_fields(content)?;
         let new_content = proto::upsert_varint_field(content, &sub, 1, new_size);
@@ -129,7 +142,7 @@ mod tests {
         assert_eq!(backpack_size(&m), Some(12));
         let m2 = set_backpack_size(&m, 39).unwrap();
         assert_eq!(backpack_size(&m2), Some(39)); // 12 + 3*9
-        // a non-grid request snaps up to the next SDU
+                                                  // a non-grid request snaps up to the next SDU
         let m3 = set_backpack_size(&m, 20).unwrap();
         assert_eq!(backpack_size(&m3), Some(21)); // 12 + 3*3
     }

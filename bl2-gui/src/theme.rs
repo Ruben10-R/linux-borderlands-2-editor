@@ -122,7 +122,11 @@ pub fn emblem(ui: &mut egui::Ui, size: f32, accent: Color32) {
             Pos2::new(c.x + r * a.cos(), c.y + r * a.sin())
         })
         .collect();
-    p.add(Shape::convex_polygon(hex, accent, Stroke::new(size * 0.11, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        hex,
+        accent,
+        Stroke::new(size * 0.11, OUTLINE),
+    ));
     let d = size * 0.20;
     let diamond = vec![
         Pos2::new(c.x, c.y - d),
@@ -130,7 +134,11 @@ pub fn emblem(ui: &mut egui::Ui, size: f32, accent: Color32) {
         Pos2::new(c.x, c.y + d),
         Pos2::new(c.x - d, c.y),
     ];
-    p.add(Shape::convex_polygon(diamond, OUTLINE, Stroke::new(1.0_f32, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        diamond,
+        OUTLINE,
+        Stroke::new(1.0_f32, OUTLINE),
+    ));
 }
 
 /// A gold coin glyph for the money row (semantic — same in every theme).
@@ -153,7 +161,11 @@ pub fn eridium(ui: &mut egui::Ui, size: f32) {
         Pos2::new(c.x, c.y + r),
         Pos2::new(c.x - r * 0.72, c.y),
     ];
-    p.add(Shape::convex_polygon(gem, GEM, Stroke::new(size * 0.11, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        gem,
+        GEM,
+        Stroke::new(size * 0.11, OUTLINE),
+    ));
 }
 
 const SERAPH_RED: Color32 = Color32::from_rgb(0xE0, 0x3A, 0x55); // crimson
@@ -170,7 +182,11 @@ pub fn seraph(ui: &mut egui::Ui, size: f32) {
         Pos2::new(c.x, c.y + r),
         Pos2::new(c.x - r * 0.55, c.y - r * 0.15),
     ];
-    p.add(Shape::convex_polygon(gem, SERAPH_RED, Stroke::new(size * 0.11, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        gem,
+        SERAPH_RED,
+        Stroke::new(size * 0.11, OUTLINE),
+    ));
     p.line_segment(
         [Pos2::new(c.x, c.y - r), Pos2::new(c.x, c.y + r)],
         Stroke::new(size * 0.06, OUTLINE),
@@ -203,7 +219,11 @@ pub fn head(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(c.x + w * 0.55, c.y + size * 0.10),
         Pos2::new(c.x + w, c.y + size * 0.42),
     ];
-    p.add(Shape::convex_polygon(shoulders, color, Stroke::new(size * 0.09, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        shoulders,
+        color,
+        Stroke::new(size * 0.09, OUTLINE),
+    ));
 }
 
 /// A wheel glyph for the Vehicle tab.
@@ -231,7 +251,10 @@ pub fn flag(ui: &mut egui::Ui, size: f32, color: Color32) {
     let c = rect.center();
     let x = c.x - size * 0.22;
     p.line_segment(
-        [Pos2::new(x, c.y - size * 0.40), Pos2::new(x, c.y + size * 0.44)],
+        [
+            Pos2::new(x, c.y - size * 0.40),
+            Pos2::new(x, c.y + size * 0.44),
+        ],
         Stroke::new(size * 0.10, OUTLINE),
     );
     let pennant = vec![
@@ -239,7 +262,11 @@ pub fn flag(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(x + size * 0.46, c.y - size * 0.24),
         Pos2::new(x, c.y - size * 0.08),
     ];
-    p.add(Shape::convex_polygon(pennant, color, Stroke::new(size * 0.09, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        pennant,
+        color,
+        Stroke::new(size * 0.09, OUTLINE),
+    ));
 }
 
 /// A signpost glyph for the Fast Travel tab (post + arrow sign).
@@ -248,7 +275,10 @@ pub fn signpost(ui: &mut egui::Ui, size: f32, color: Color32) {
     let c = rect.center();
     // Post.
     p.line_segment(
-        [Pos2::new(c.x, c.y - size * 0.30), Pos2::new(c.x, c.y + size * 0.44)],
+        [
+            Pos2::new(c.x, c.y - size * 0.30),
+            Pos2::new(c.x, c.y + size * 0.44),
+        ],
         Stroke::new(size * 0.10, OUTLINE),
     );
     // Arrow sign pointing right.
@@ -260,7 +290,11 @@ pub fn signpost(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(c.x + size * 0.20, b),
         Pos2::new(l, b),
     ];
-    p.add(Shape::convex_polygon(sign, color, Stroke::new(size * 0.09, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        sign,
+        color,
+        Stroke::new(size * 0.09, OUTLINE),
+    ));
 }
 
 /// A document/list glyph for the Raw inspector tab.
@@ -274,7 +308,11 @@ pub fn page(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(c.x + w, c.y + h),
         Pos2::new(c.x - w, c.y + h),
     ];
-    p.add(Shape::convex_polygon(page, color, Stroke::new(size * 0.09, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        page,
+        color,
+        Stroke::new(size * 0.09, OUTLINE),
+    ));
     for i in 0..3 {
         let y = c.y - h * 0.4 + i as f32 * h * 0.42;
         p.line_segment(
@@ -292,7 +330,10 @@ pub fn info(ui: &mut egui::Ui, size: f32, color: Color32) {
     p.circle(c, r, color, Stroke::new(size * 0.10, OUTLINE));
     p.circle_filled(Pos2::new(c.x, c.y - r * 0.42), size * 0.06, OUTLINE);
     p.line_segment(
-        [Pos2::new(c.x, c.y - r * 0.08), Pos2::new(c.x, c.y + r * 0.45)],
+        [
+            Pos2::new(c.x, c.y - r * 0.08),
+            Pos2::new(c.x, c.y + r * 0.45),
+        ],
         Stroke::new(size * 0.12, OUTLINE),
     );
 }
@@ -308,7 +349,11 @@ pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(c.x + h, c.y + h),
         Pos2::new(c.x - h, c.y + h),
     ];
-    p.add(Shape::convex_polygon(square, color, Stroke::new(size * 0.10, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        square,
+        color,
+        Stroke::new(size * 0.10, OUTLINE),
+    ));
     let d = h * 0.62;
     let diamond = vec![
         Pos2::new(c.x, c.y - d),
@@ -316,5 +361,9 @@ pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
         Pos2::new(c.x, c.y + d),
         Pos2::new(c.x - d, c.y),
     ];
-    p.add(Shape::convex_polygon(diamond, OUTLINE, Stroke::new(1.0_f32, OUTLINE)));
+    p.add(Shape::convex_polygon(
+        diamond,
+        OUTLINE,
+        Stroke::new(1.0_f32, OUTLINE),
+    ));
 }

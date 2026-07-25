@@ -14,6 +14,7 @@
 //! ```
 
 mod capacity;
+mod catalog;
 mod codec;
 mod customizations;
 mod error;
@@ -31,6 +32,7 @@ pub use levels::{level_for_xp, xp_for_level};
 pub use profile::ProfileFile;
 pub use vehicles::{VehicleFamily, VehicleSkin, FAMILIES as VEHICLE_FAMILIES};
 
+pub use catalog::*;
 pub use customizations::Customization;
 pub use error::{Result, SaveError};
 pub use item_codes::{code_library, library_categories, LibraryItem};
@@ -56,7 +58,10 @@ impl SaveFile {
             return Err(if !dec.sha_ok {
                 SaveError::Sha1Mismatch
             } else {
-                SaveError::CrcMismatch { stored: dec.crc_stored, computed: dec.crc_calc }
+                SaveError::CrcMismatch {
+                    stored: dec.crc_stored,
+                    computed: dec.crc_calc,
+                }
             });
         }
         Ok(Self { proto: dec.proto })
@@ -140,7 +145,9 @@ impl SaveFile {
                     2 => {
                         let content = proto::wire2_content(&self.proto, f)?;
                         let printable = !content.is_empty()
-                            && content.iter().all(|&b| b == b'\t' || b == b'\n' || (0x20..0x7f).contains(&b));
+                            && content
+                                .iter()
+                                .all(|&b| b == b'\t' || b == b'\n' || (0x20..0x7f).contains(&b));
                         if printable {
                             let s = String::from_utf8_lossy(content).into_owned();
                             rf.kind = "string";
@@ -226,7 +233,9 @@ impl SaveFile {
     pub fn active_playthrough(&self) -> i64 {
         self.fields()
             .ok()
-            .and_then(|fs| proto::read_varint_field(&self.proto, &fs, proto::FIELD_ACTIVE_PLAYTHROUGH))
+            .and_then(|fs| {
+                proto::read_varint_field(&self.proto, &fs, proto::FIELD_ACTIVE_PLAYTHROUGH)
+            })
             .unwrap_or(0)
     }
 
@@ -251,7 +260,9 @@ impl SaveFile {
     /// Character name (from the appearance message, sub-field 1).
     pub fn name(&self) -> Option<String> {
         let fields = self.fields().ok()?;
-        let f = fields.iter().find(|f| f.number == proto::FIELD_APPEARANCE && f.wire_type == 2)?;
+        let f = fields
+            .iter()
+            .find(|f| f.number == proto::FIELD_APPEARANCE && f.wire_type == 2)?;
         let inner = proto::wire2_content(&self.proto, f).ok()?;
         let ifields = proto::parse_fields(inner).ok()?;
         proto::read_string_field(inner, &ifields, 1)
@@ -260,7 +271,9 @@ impl SaveFile {
     /// The fast-travel stations this character has unlocked (protobuf field 16,
     /// `repeated string visited_teleporters`), e.g. "SouthernShelfTown".
     pub fn visited_stations(&self) -> Vec<String> {
-        let Ok(fields) = self.fields() else { return Vec::new() };
+        let Ok(fields) = self.fields() else {
+            return Vec::new();
+        };
         fields
             .iter()
             .filter(|f| f.number == 16 && f.wire_type == 2)
@@ -274,7 +287,9 @@ impl SaveFile {
     /// The "wearing" list (field 35): index 0 = head path, index 4 = skin path,
     /// with "0" placeholders between. Returns the raw strings.
     pub fn wearing(&self) -> Vec<String> {
-        let Ok(fields) = self.fields() else { return Vec::new() };
+        let Ok(fields) = self.fields() else {
+            return Vec::new();
+        };
         fields
             .iter()
             .filter(|f| f.number == 35 && f.wire_type == 2)
@@ -341,22 +356,34 @@ impl SaveFile {
 
     /// Money (dollars) — `currency_on_hand[0]`.
     pub fn money(&self) -> i64 {
-        self.currency().ok().and_then(|c| c.get(proto::IDX_MONEY).copied()).unwrap_or(0)
+        self.currency()
+            .ok()
+            .and_then(|c| c.get(proto::IDX_MONEY).copied())
+            .unwrap_or(0)
     }
 
     /// Eridium — `currency_on_hand[1]`.
     pub fn eridium(&self) -> i64 {
-        self.currency().ok().and_then(|c| c.get(proto::IDX_ERIDIUM).copied()).unwrap_or(0)
+        self.currency()
+            .ok()
+            .and_then(|c| c.get(proto::IDX_ERIDIUM).copied())
+            .unwrap_or(0)
     }
 
     /// Seraph crystals — `currency_on_hand[2]`.
     pub fn seraph(&self) -> i64 {
-        self.currency().ok().and_then(|c| c.get(proto::IDX_SERAPH).copied()).unwrap_or(0)
+        self.currency()
+            .ok()
+            .and_then(|c| c.get(proto::IDX_SERAPH).copied())
+            .unwrap_or(0)
     }
 
     /// Torgue tokens — `currency_on_hand[4]`.
     pub fn torgue(&self) -> i64 {
-        self.currency().ok().and_then(|c| c.get(proto::IDX_TORGUE).copied()).unwrap_or(0)
+        self.currency()
+            .ok()
+            .and_then(|c| c.get(proto::IDX_TORGUE).copied())
+            .unwrap_or(0)
     }
 
     /// All decoded backpack + bank items and weapons.
@@ -454,7 +481,8 @@ impl SaveFile {
     /// Set available skill points (added if the field is absent).
     pub fn set_skill_points(&mut self, value: i64) -> Result<()> {
         let fields = self.fields()?;
-        let new = proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS, value);
+        let new =
+            proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS, value);
         proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_SKILL_POINTS])?;
         self.proto = new;
         Ok(())
@@ -477,8 +505,12 @@ impl SaveFile {
     /// Set playthroughs completed (0–3). 1 unlocks TVHM, 2 unlocks UVHM.
     pub fn set_playthroughs_completed(&mut self, value: i64) -> Result<()> {
         let fields = self.fields()?;
-        let new =
-            proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_PLAYTHROUGHS_COMPLETED, value);
+        let new = proto::upsert_varint_field(
+            &self.proto,
+            &fields,
+            proto::FIELD_PLAYTHROUGHS_COMPLETED,
+            value,
+        );
         proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_PLAYTHROUGHS_COMPLETED])?;
         self.proto = new;
         Ok(())
@@ -487,8 +519,12 @@ impl SaveFile {
     /// Set the current playthrough (0 = Normal, 1 = TVHM, 2 = UVHM). Added if absent.
     pub fn set_active_playthrough(&mut self, value: i64) -> Result<()> {
         let fields = self.fields()?;
-        let new =
-            proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_ACTIVE_PLAYTHROUGH, value);
+        let new = proto::upsert_varint_field(
+            &self.proto,
+            &fields,
+            proto::FIELD_ACTIVE_PLAYTHROUGH,
+            value,
+        );
         proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_ACTIVE_PLAYTHROUGH])?;
         self.proto = new;
         Ok(())
@@ -519,7 +555,8 @@ impl SaveFile {
             proto::emit_wire2_field(&mut v, 1, name.as_bytes());
             v
         };
-        let new = proto::replace_field_content(&self.proto, &fields, proto::FIELD_APPEARANCE, &new_inner);
+        let new =
+            proto::replace_field_content(&self.proto, &fields, proto::FIELD_APPEARANCE, &new_inner);
         proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_APPEARANCE])?;
         self.proto = new;
         Ok(())
@@ -601,573 +638,5 @@ impl SaveFile {
     }
 }
 
-/// What a `BL2(...)` code decodes to, for building an item-code library.
-#[derive(Clone, Debug)]
-pub struct CodeInfo {
-    /// One of: "Weapon", "Shield", "Grenade", "Class Mod", "Relic", "Item".
-    pub category: &'static str,
-    /// Readable name (manufacturer + type, e.g. "Jakobs Sniper").
-    pub name: String,
-    /// The balance/family id — variants of the same item share it.
-    pub family: String,
-    /// Item level (game stage), 0 if none.
-    pub level: i64,
-}
-
-/// Decode a `BL2(...)` code into a [`CodeInfo`] (category + name), or None if it
-/// isn't a valid code. Uses the item serial + GameInfo — no save needed.
-pub fn describe_code(code: &str) -> Option<CodeInfo> {
-    let (serial, _) = serial::from_code(code).ok()?;
-    let s = serial::unwrap(&serial).ok()?;
-    let type_name = s.type_name().unwrap_or_default();
-    let category = if s.is_weapon {
-        "Weapon"
-    } else {
-        let hay = format!("{} {}", type_name, s.balance_name().unwrap_or_default()).to_lowercase();
-        if hay.contains("shield") {
-            "Shield"
-        } else if hay.contains("grenade") {
-            "Grenade"
-        } else if hay.contains("class") && hay.contains("mod") || hay.contains("classmod") {
-            "Class Mod"
-        } else if hay.contains("artifact") || hay.contains("relic") {
-            "Relic"
-        } else {
-            "Item"
-        }
-    };
-    let manu = s.manufacturer_name().unwrap_or_default();
-    let name = format!("{manu} {type_name}").trim().to_string();
-    let family = s
-        .balance_name()
-        .filter(|b| !b.is_empty())
-        .unwrap_or_else(|| if name.is_empty() { "Unknown".into() } else { name.clone() });
-    Some(CodeInfo { category, name, family, level: s.stage.unwrap_or(0) })
-}
-
-/// Pull every `BL2(...)` token out of free text. A code's base64 body can
-/// contain `/` and `+`, but never `)`, so scanning `BL2(` up to the next `)`
-/// robustly separates codes regardless of the separators between them.
-pub fn extract_codes(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("BL2(") {
-        let after = &rest[start..];
-        if let Some(end) = after.find(')') {
-            out.push(after[..=end].to_string());
-            rest = &after[end + 1..];
-        } else {
-            break;
-        }
-    }
-    out
-}
-
-/// The six playable classes: (display name, class-definition asset path).
-/// Paths extracted from Gibbed's GameInfo; pass the path to [`SaveFile::set_class`].
-pub const CLASSES: [(&str, &str); 6] = [
-    ("Axton (Commando)", "GD_Soldier.Character.CharClass_Soldier"),
-    ("Maya (Siren)", "GD_Siren.Character.CharClass_Siren"),
-    ("Salvador (Gunzerker)", "GD_Mercenary.Character.CharClass_Mercenary"),
-    ("Zer0 (Assassin)", "GD_Assassin.Character.CharClass_Assassin"),
-    ("Gaige (Mechromancer)", "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer"),
-    ("Krieg (Psycho)", "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"),
-];
-
-/// A grouped view of one top-level protobuf field number, for the Raw inspector.
-/// Single-occurrence scalar fields expose an editable `value`/`text`; repeated or
-/// nested fields are summarised in `preview`.
-#[derive(Clone, Debug)]
-pub struct RawField {
-    pub number: u64,
-    /// Human field name (from the save schema), or "" if unknown.
-    pub name: &'static str,
-    /// Plain-language explanation of the field, or "" if undocumented.
-    pub help: &'static str,
-    /// "varint", "string", "message", "collection", "bytes", "fixed32/64".
-    pub kind: &'static str,
-    /// Number of occurrences of this field number.
-    pub count: usize,
-    /// Editable value for a single-occurrence varint field.
-    pub value: Option<i64>,
-    /// Editable value for a single-occurrence UTF-8 string field.
-    pub text: Option<String>,
-    /// Human summary (value, quoted string, "(message, N bytes)", "N entries").
-    pub preview: String,
-}
-
-/// One selectable part in a parts picker.
-#[derive(Clone, Debug)]
-pub struct PartOption {
-    pub lib: u32,
-    pub asset: u32,
-    pub name: String,
-}
-
-/// Every known fast-travel station (base game + DLC), for building the unlock
-/// list. Each `Station`'s `rn` is what [`SaveFile::set_visited_stations`] expects.
-pub fn stations_catalog() -> &'static [Station] {
-    stations::catalog()
-}
-
-/// Display name for a stored station `resource_name`, if known.
-pub fn station_display_name(resource_name: &str) -> Option<&'static str> {
-    stations::display_name(resource_name)
-}
-
-/// Every head (`is_head=true`) or skin usable by the given class-definition path,
-/// for building a customization picker. See [`SaveFile::set_wearing`].
-pub fn customizations(class_def: &str, is_head: bool) -> Vec<Customization> {
-    customizations::for_class(class_def, is_head)
-}
-
-/// Every skin usable by a vehicle family (by its token, e.g. "Runner").
-pub fn vehicle_skins(family_token: &str) -> &'static [VehicleSkin] {
-    vehicles::skins_for(family_token)
-}
-
-/// Display name for an equipped vehicle skin path, if known.
-pub fn vehicle_skin_name(path: &str) -> Option<&'static str> {
-    vehicles::skin_name(path)
-}
-
-/// Display name for an equipped head/skin path, if known.
-pub fn customization_name(path: &str) -> Option<&'static str> {
-    customizations::name(path)
-}
-
-/// The stock "Default" head/skin path for a class (a safe reset).
-pub fn default_customization(class_def: &str, is_head: bool) -> Option<String> {
-    customizations::default_path(class_def, is_head)
-}
-
-/// Human name for part slot `slot` of a weapon or item.
-///
-/// Weapons have a fixed 11-slot layout, so every slot gets its real name.
-/// Items are heterogeneous (a shield, grenade mod and relic use slots 0–7 for
-/// different things), so only the tail — Material/Prefix/Title — is named; the
-/// rest are generic "Part N". Verified against real save0001 items.
-pub fn slot_label(is_weapon: bool, slot: usize) -> &'static str {
-    const WEAPON: [&str; 11] = [
-        "Body", "Grip", "Barrel", "Sight", "Stock", "Element", "Accessory 1",
-        "Accessory 2", "Material", "Prefix", "Title",
-    ];
-    const ITEM: [&str; 11] = [
-        "Part 1", "Part 2", "Part 3", "Part 4", "Part 5", "Part 6", "Part 7",
-        "Part 8", "Material", "Prefix", "Title",
-    ];
-    let table = if is_weapon { &WEAPON } else { &ITEM };
-    table.get(slot).copied().unwrap_or("Part")
-}
-
-/// Every available part (with a readable name) for weapons vs items in a given
-/// set — the choices for a parts picker. NOTE: not filtered by item compatibility,
-/// so arbitrary combinations can produce items the game rejects.
-pub fn parts_catalog(is_weapon: bool, set: u32) -> Vec<PartOption> {
-    let category = if is_weapon { "WeaponParts" } else { "ItemParts" };
-    gameinfo::catalog(category, set)
-        .into_iter()
-        .map(|(lib, asset, name)| PartOption { lib, asset, name })
-        .collect()
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Build a tiny synthetic top-level protobuf: class(1,str), level(2), xp(3),
-    /// packed currency(6)=[money, eridium, 0], plus an "unknown" field(9) we must
-    /// never disturb.
-    fn synthetic_proto() -> Vec<u8> {
-        let mut p = Vec::new();
-        // field 1, wire 2: class string
-        let class = b"GD_Assassin.Character.CharClass_Assassin";
-        p.push((1 << 3) | 2);
-        p.push(class.len() as u8);
-        p.extend_from_slice(class);
-        // field 2, wire 0: level = 4
-        p.push((2 << 3) | 0);
-        p.push(4);
-        // field 3, wire 0: xp = 4288
-        p.push((3 << 3) | 0);
-        p.extend_from_slice(&[0xC0, 0x21]); // 4288 as varint
-        // field 6, wire 2: packed [608, 0, 0]
-        p.push((6 << 3) | 2);
-        p.push(4); // payload len: 608(2) + 0 + 0
-        p.extend_from_slice(&[0xE0, 0x04, 0x00, 0x00]);
-        // field 9, wire 2: opaque "unknown" bytes
-        p.push((9 << 3) | 2);
-        p.push(3);
-        p.extend_from_slice(&[0xDE, 0xAD, 0xBE][..3]);
-        p
-    }
-
-    #[test]
-    fn codec_roundtrip_is_byte_identical_and_valid() {
-        let proto = synthetic_proto();
-        let bytes = codec::encode(&proto).unwrap();
-        let dec = codec::decode(&bytes).unwrap();
-        assert!(dec.is_valid(), "checksums must validate");
-        assert_eq!(dec.proto, proto, "round-trip must preserve protobuf exactly");
-    }
-
-    #[test]
-    fn reads_expected_scalars() {
-        let s = SaveFile { proto: synthetic_proto() };
-        assert_eq!(s.level(), Some(4));
-        assert_eq!(s.xp(), Some(4288));
-        assert_eq!(s.money(), 608);
-        assert_eq!(s.eridium(), 0);
-        assert_eq!(s.class_name().as_deref(), Some("Zer0 (Assassin)"));
-    }
-
-    #[test]
-    fn code_library_loads_and_is_valid() {
-        let lib = code_library();
-        assert!(lib.len() > 1000, "library populated ({} entries)", lib.len());
-        // every entry is a real BL2(...) code and decodes
-        for e in lib.iter().take(50) {
-            assert!(e.code.starts_with("BL2(") && e.code.ends_with(')'));
-            assert!(describe_code(&e.code).is_some(), "entry decodes: {}", e.code);
-            assert!(!e.category.is_empty());
-        }
-        assert!(library_categories().contains(&"Weapon"));
-    }
-
-    #[test]
-    fn extract_codes_handles_separators_and_slashes() {
-        // Codes contain '/' and '+'; separators between them vary.
-        let text = "BL2(aa/bb+cc) , BL2(dd) | BL2(ee) / junk BL2(ff)\nBL2(gg)";
-        let codes = extract_codes(text);
-        assert_eq!(codes, ["BL2(aa/bb+cc)", "BL2(dd)", "BL2(ee)", "BL2(ff)", "BL2(gg)"]);
-        assert!(extract_codes("no codes here").is_empty());
-        // an unterminated trailing code is ignored
-        assert_eq!(extract_codes("BL2(ok) BL2(unterminated"), ["BL2(ok)"]);
-    }
-
-    #[test]
-    fn slot_labels_match_layout() {
-        // Weapons: fixed 11-slot layout, every slot named.
-        assert_eq!(slot_label(true, 0), "Body");
-        assert_eq!(slot_label(true, 2), "Barrel");
-        assert_eq!(slot_label(true, 10), "Title");
-        // Items: only the tail is reliably named across item types.
-        assert_eq!(slot_label(false, 8), "Material");
-        assert_eq!(slot_label(false, 9), "Prefix");
-        assert_eq!(slot_label(false, 10), "Title");
-        assert_eq!(slot_label(false, 0), "Part 1");
-        // Out of range is graceful.
-        assert_eq!(slot_label(true, 99), "Part");
-    }
-
-    #[test]
-    fn edits_change_only_the_target_field() {
-        let mut s = SaveFile { proto: synthetic_proto() };
-        s.set_money(99_999_999).unwrap();
-        s.set_eridium(500).unwrap();
-        s.set_level(50).unwrap();
-        s.set_xp(1_000_000).unwrap();
-        assert_eq!(s.money(), 99_999_999);
-        assert_eq!(s.eridium(), 500);
-        assert_eq!(s.level(), Some(50));
-        assert_eq!(s.xp(), Some(1_000_000));
-        // The opaque unknown field (9) must be byte-preserved.
-        let fields = s.fields().unwrap();
-        let f9 = fields.iter().find(|f| f.number == 9).expect("field 9 preserved");
-        assert_eq!(&s.proto[f9.val_start + 1..f9.end], &[0xDE, 0xAD, 0xBE]);
-    }
-
-    /// The game decompresses saves with a C LZO1x implementation. Prove our
-    /// pure-Rust `lzokay` compressed output is decodable by that canonical C impl
-    /// (`minilzo`) — i.e. it is standard LZO1x the game will accept.
-    #[test]
-    fn lzokay_output_is_decodable_by_c_lzo() {
-        // Semi-structured data so the compressor actually emits matches + literals.
-        let outer: Vec<u8> = (0..8192u32)
-            .map(|i| ((i as u8).wrapping_mul(37)) ^ ((i >> 3) as u8))
-            .collect();
-        let comp = lzokay_native::compress(&outer).expect("lzokay compress");
-        let lzo = minilzo_rs::LZO::init().expect("minilzo init");
-        let back = lzo.decompress_safe(&comp, outer.len()).expect("C LZO decompress");
-        assert_eq!(back, outer, "C LZO must decode lzokay output → the game will too");
-    }
-
-    #[test]
-    fn currency_indices() {
-        let mut s = SaveFile { proto: synthetic_proto() };
-        s.set_money(1).unwrap();
-        s.set_eridium(2).unwrap();
-        s.set_seraph(3).unwrap();
-        s.set_torgue(4).unwrap(); // pads currency_on_hand out to index 4
-        assert_eq!((s.money(), s.eridium(), s.seraph(), s.torgue()), (1, 2, 3, 4));
-    }
-
-    #[test]
-    fn character_edits() {
-        let mut s = SaveFile { proto: synthetic_proto() };
-        s.set_skill_points(7).unwrap(); // field 4 absent in synthetic → appended
-        assert_eq!(s.skill_points(), Some(7));
-        s.set_class("GD_Siren.Character.CharClass_Siren").unwrap();
-        assert_eq!(s.class_name().as_deref(), Some("Maya (Siren)"));
-        assert_eq!(s.class_def().as_deref(), Some("GD_Siren.Character.CharClass_Siren"));
-        // Other fields untouched.
-        assert_eq!(s.level(), Some(4));
-        assert_eq!(s.money(), 608);
-    }
-
-    #[test]
-    fn full_edit_still_encodes_and_self_verifies() {
-        let mut s = SaveFile { proto: synthetic_proto() };
-        s.set_money(12_345).unwrap();
-        // to_bytes() self-verifies; if the encoded file didn't round-trip it errors.
-        let bytes = s.to_bytes().unwrap();
-        let reloaded = SaveFile::from_bytes(&bytes).unwrap();
-        assert_eq!(reloaded.money(), 12_345);
-    }
-
-    /// Golden test against a real save if one is present (they're gitignored, so
-    /// skip cleanly in CI / on machines without a sample).
-    #[test]
-    fn golden_real_save_if_present() {
-        let candidates = ["../samples/save0001.sav", "samples/save0001.sav"];
-        let Some(path) = candidates.iter().find(|p| std::path::Path::new(p).exists()) else {
-            eprintln!("golden: no sample save present, skipping");
-            return;
-        };
-        let save = SaveFile::load(path).expect("real save should load");
-        // Re-encode must round-trip byte-identically at the protobuf level.
-        let bytes = save.to_bytes().expect("real save should self-verify");
-        let reloaded = SaveFile::from_bytes(&bytes).unwrap();
-        assert_eq!(save.money(), reloaded.money());
-        assert!(save.level().is_some());
-
-        // Decisive game-acceptance proxy: our (lzokay) re-encoded REAL save must be
-        // decompressible by the C LZO the game uses, to a valid WSG buffer.
-        let outer_size = u32::from_be_bytes(bytes[20..24].try_into().unwrap()) as usize;
-        let lzo = minilzo_rs::LZO::init().unwrap();
-        let outer = lzo
-            .decompress_safe(&bytes[24..], outer_size)
-            .expect("game's C LZO must decompress our real re-encoded save");
-        assert_eq!(outer.len(), outer_size, "decompressed size must match header");
-        assert_eq!(&outer[4..7], b"WSG", "decompressed buffer must be a WSG block");
-
-        // Every REAL item serial must decode AND re-encode byte-for-byte. The
-        // hand-crafted "virtual" placeholders (OP-level markers, set==255) are
-        // decoded but not normally packed, so they're excluded from the byte check.
-        let serials = items::raw_serials(&save.proto).expect("read serials");
-        let mut real = 0;
-        for (n, s) in serials.iter().enumerate() {
-            let decoded = serial::unwrap(s).unwrap_or_else(|e| panic!("serial #{n} decode: {e}"));
-            if decoded.is_placeholder() {
-                continue;
-            }
-            real += 1;
-            let re = serial::reencode(s).expect("reencode");
-            assert_eq!(&re, s, "real serial #{n} must round-trip byte-for-byte");
-        }
-        eprintln!("golden: {}/{} real serials round-tripped", real, serials.len());
-        // The typed list should decode without error too.
-        let _ = save.items().expect("items() should succeed");
-
-        // Re-level every item to 50: must self-verify, change only item fields,
-        // and every non-placeholder item must then report level 50.
-        let mut leveled = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        let n = leveled.set_all_item_levels(50, true).expect("relevel");
-        let _ = leveled.to_bytes().expect("re-leveled save must self-verify");
-        assert_eq!(leveled.money(), save.money(), "re-leveling must not touch money");
-        for it in leveled.items().unwrap() {
-            if !it.serial.is_placeholder() {
-                assert_eq!(it.serial.stage, Some(50), "item should now be level 50");
-            }
-        }
-        eprintln!("golden: re-leveled {n} items to 50");
-
-        // Per-item leveling by id: changes iff the item is levelable; protected
-        // (grade-≤1) items stay locked. All levelable items end at 42.
-        let mut one = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        for it in save.items().unwrap() {
-            let changed = one.set_item_level(it.id, 42).unwrap();
-            assert_eq!(changed, it.serial.is_levelable(), "id {}: changed vs levelable", it.id);
-        }
-        let _ = one.to_bytes().expect("per-item edits must self-verify");
-        for it in one.items().unwrap() {
-            if it.serial.is_levelable() {
-                assert_eq!(it.serial.stage, Some(42), "levelable item should be 42");
-            }
-        }
-
-        // Parts editing: swap a present part on the first item that has one.
-        if let Some(it) = save
-            .items()
-            .unwrap()
-            .into_iter()
-            .find(|it| !it.serial.is_placeholder() && it.serial.parts.iter().any(|p| p.is_some()))
-        {
-            let cat = parts_catalog(it.serial.is_weapon, it.serial.set);
-            assert!(!cat.is_empty(), "parts catalog must not be empty");
-            let slot = it.serial.parts.iter().position(|p| p.is_some()).unwrap();
-            let choice = &cat[0];
-            let mut edited = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-            assert!(edited.set_item_part(it.id, slot, choice.lib, choice.asset).unwrap());
-            let _ = edited.to_bytes().expect("part edit must self-verify");
-            let after = edited.items().unwrap();
-            let pr = after.iter().find(|x| x.id == it.id).unwrap().serial.parts[slot].unwrap();
-            assert_eq!((pr.lib, pr.asset), (choice.lib, choice.asset), "slot holds chosen part");
-            eprintln!("golden: swapped part slot {slot} to {}", choice.name);
-        }
-
-        // Name editing (appearance sub-field) on the real save.
-        if save.name().is_some() {
-            let mut n = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-            n.set_name("Zer0edit").expect("set_name");
-            let _ = n.to_bytes().expect("name edit self-verify");
-            assert_eq!(n.name().as_deref(), Some("Zer0edit"));
-            assert_eq!(n.money(), save.money(), "name edit must not touch money");
-            eprintln!("golden: renamed to {:?}", n.name());
-        }
-
-        // Item codes: export the first real item, re-import it, and the copy must
-        // decode to the same balance/kind (only its key differs). Count grows by 1.
-        if let Some(orig) = save.items().unwrap().into_iter().find(|it| !it.serial.is_placeholder())
-        {
-            let code = save.item_code(orig.id).unwrap().expect("code for real item");
-            assert!(code.starts_with("BL2(") && code.ends_with(')'), "code shape: {code}");
-
-            let mut imp = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-            let before = imp.items().unwrap().len();
-            imp.add_item_from_code(&code, false).expect("import code");
-            let _ = imp.to_bytes().expect("imported item must self-verify");
-            let after = imp.items().unwrap();
-            assert_eq!(after.len(), before + 1, "one item added");
-            let added = after.last().unwrap();
-            assert_eq!(added.serial.balance, orig.serial.balance, "same balance");
-            assert_eq!(added.serial.is_weapon, orig.serial.is_weapon, "same kind");
-            assert_eq!(imp.money(), save.money(), "import must not touch money");
-            eprintln!("golden: exported+reimported {} ({} chars)", code.len(), code.len());
-        }
-
-        // Fast-travel stations decode as non-empty short names; raw inspector
-        // lists the class field (#1) among the top-level fields.
-        let stations = save.visited_stations();
-        assert!(stations.iter().all(|s| !s.is_empty()), "station names non-empty");
-        assert!(save.raw_fields().unwrap().iter().any(|f| f.number == 1), "raw lists field 1");
-        eprintln!("golden: {} stations, last = {:?}", stations.len(), save.last_station());
-
-        // Unlock-all-stations: rewrite field 16 to the full catalog; must
-        // self-verify, touch nothing else, and read back the same set.
-        let all: Vec<String> = stations_catalog().iter().map(|s| s.rn.clone()).collect();
-        assert!(all.len() > 50, "station catalog populated");
-        let mut ft = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        ft.set_visited_stations(&all).expect("set stations");
-        let _ = ft.to_bytes().expect("station edit must self-verify");
-        assert_eq!(ft.visited_stations().len(), all.len(), "all stations unlocked");
-        assert_eq!(ft.money(), save.money(), "station edit must not touch money");
-        assert_eq!(ft.name(), save.name(), "station edit must not touch name");
-        // A known station resolves to its display name.
-        assert_eq!(station_display_name("SouthernShelfTown"), Some("Southern Shelf"));
-        eprintln!("golden: unlocked all {} stations", all.len());
-
-        // General/playthrough edits: playthroughs_completed (field 7, present) and
-        // active_playthrough (field 49, likely absent → appended). Guarded, self-verify.
-        let mut gen = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        gen.set_playthroughs_completed(2).expect("set playthroughs");
-        gen.set_active_playthrough(1).expect("set active playthrough");
-        let _ = gen.to_bytes().expect("general edits must self-verify");
-        assert_eq!(gen.playthroughs_completed(), Some(2));
-        assert_eq!(gen.active_playthrough(), 1);
-        assert_eq!(gen.money(), save.money(), "general edits must not touch money");
-        assert_eq!(gen.name(), save.name(), "general edits must not touch name");
-        assert_eq!(gen.level(), save.level(), "general edits must not touch level");
-        eprintln!(
-            "golden: playthroughs {:?} -> 2, active -> 1; save id {:?}, time {:?}s",
-            save.playthroughs_completed(),
-            save.save_game_id(),
-            save.time_played()
-        );
-
-        // Head/skin (field 35 "wearing"): the catalog for this character's class
-        // is populated; equipping a catalog head+skin self-verifies and reads back.
-        if let Some(class_def) = save.class_def() {
-            let heads = customizations(&class_def, true);
-            let skins = customizations(&class_def, false);
-            assert!(!heads.is_empty() && !skins.is_empty(), "customization catalog for class");
-            let (h, s) = (heads[0].path.clone(), skins[0].path.clone());
-            let mut app = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-            app.set_wearing(&h, &s).expect("set wearing");
-            let _ = app.to_bytes().expect("wearing edit must self-verify");
-            let w = app.wearing();
-            assert_eq!(w.first().map(String::as_str), Some(h.as_str()), "head at index 0");
-            assert_eq!(w.get(4).map(String::as_str), Some(s.as_str()), "skin at index 4");
-            assert_eq!(app.money(), save.money(), "wearing edit must not touch money");
-            assert_eq!(app.name(), save.name(), "wearing edit must not touch name");
-            eprintln!("golden: equipped head {:?} + skin {:?}", heads[0].name, skins[0].name);
-        }
-
-        // Vehicle skins (field 57): equip a Runner skin, self-verify, read back,
-        // touch nothing else.
-        let runner = &VEHICLE_FAMILIES[0];
-        let skins = vehicle_skins(runner.token);
-        assert!(!skins.is_empty(), "runner skins present");
-        let chosen = vec![skins[0].path.clone(), skins[1].path.clone()];
-        let mut veh = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        veh.set_vehicle_skins(runner.path, &chosen).expect("set vehicle skins");
-        let _ = veh.to_bytes().expect("vehicle edit must self-verify");
-        assert_eq!(veh.vehicle_family_skins(runner.path), chosen, "runner skins read back");
-        assert_eq!(veh.money(), save.money(), "vehicle edit must not touch money");
-        assert_eq!(veh.name(), save.name(), "vehicle edit must not touch name");
-        assert_eq!(vehicle_skin_name(&skins[0].path), Some(skins[0].name.as_str()));
-        eprintln!("golden: equipped Runner skins {:?}", skins[0].name);
-
-        // Overpower level (virtual item in field 53): set 8, read back 8,
-        // self-verify, and re-set to 10 (exercises the update-in-place path).
-        let mut op = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        op.set_op_level(8).expect("set op 8");
-        let _ = op.to_bytes().expect("op edit must self-verify");
-        assert_eq!(op.op_level(), Some(8), "OP level reads back as 8");
-        op.set_op_level(10).expect("set op 10");
-        let _ = op.to_bytes().expect("op re-edit must self-verify");
-        assert_eq!(op.op_level(), Some(10), "OP level updates in place to 10");
-        assert_eq!(op.money(), save.money(), "op edit must not touch money");
-        assert_eq!(op.items().unwrap().len(), {
-            // setting OP twice must not keep appending virtual items
-            let mut o2 = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-            o2.set_op_level(1).unwrap();
-            o2.set_op_level(2).unwrap();
-            o2.items().unwrap().len()
-        }, "no duplicate OP virtual items");
-        eprintln!("golden: OP level {:?} -> 10", save.op_level());
-
-        // XP<->level sync table + raw named/grouped fields + raw edit.
-        assert_eq!(xp_for_level(1), 0);
-        assert_eq!(xp_for_level(72), xp_for_level(72));
-        assert_eq!(level_for_xp(xp_for_level(50)), 50, "level_for_xp inverts xp_for_level");
-        assert_eq!(level_for_xp(0), 1);
-        let raw = save.raw_fields().unwrap();
-        let class = raw.iter().find(|r| r.number == 1).expect("field 1");
-        assert_eq!(class.name, "class");
-        assert!(class.text.is_some(), "class is an editable string field");
-        assert!(raw.iter().any(|r| r.number == 8 && r.kind == "collection"), "skills is a collection");
-        // Raw edit of a scalar varint (mission_number, field 21) touches only it.
-        let mut r = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        r.set_raw_varint(proto::FIELD_LEVEL, 55).unwrap();
-        assert_eq!(r.level(), Some(55));
-        assert_eq!(r.money(), save.money(), "raw edit must not touch money");
-        eprintln!("golden: raw fields {} groups; sync/raw ok", raw.len());
-
-        // Backpack/Bank capacity: set 39/24, snap to SDU grid, self-verify, and
-        // confirm only the capacity fields moved.
-        let mut cap = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
-        cap.set_backpack_size(39).expect("set backpack");
-        cap.set_bank_size(24).expect("set bank");
-        let _ = cap.to_bytes().expect("capacity edit must self-verify");
-        assert_eq!(cap.backpack_size(), Some(39), "backpack snaps to 39");
-        assert_eq!(cap.bank_size(), 24, "bank snaps to 24");
-        assert_eq!(cap.money(), save.money(), "capacity edit must not touch money");
-        assert_eq!(cap.items().unwrap().len(), save.items().unwrap().len(), "no items added");
-        eprintln!(
-            "golden: backpack {:?}->39, bank {}->24",
-            save.backpack_size(),
-            save.bank_size()
-        );
-    }
-}
+mod tests;

@@ -23,18 +23,27 @@ fn asset_path(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> 
     let sub = db().get(category)?.get(set as usize)?.get(lib as usize)?;
     let pkg = sub.get("p")?.as_str().unwrap_or("");
     let a = sub.get("a")?.as_array()?.get(asset as usize)?.as_str()?;
-    Some(if pkg.is_empty() { a.to_string() } else { format!("{pkg}.{a}") })
+    Some(if pkg.is_empty() {
+        a.to_string()
+    } else {
+        format!("{pkg}.{a}")
+    })
 }
 
 /// Every `(lib, asset, name)` in a category for a set — for building pickers.
 pub(crate) fn catalog(category: &str, set: u32) -> Vec<(u32, u32, String)> {
     let mut out = Vec::new();
-    let Some(subs) = db().get(category).and_then(|c| c.get(set as usize)).and_then(|s| s.as_array())
+    let Some(subs) = db()
+        .get(category)
+        .and_then(|c| c.get(set as usize))
+        .and_then(|s| s.as_array())
     else {
         return out;
     };
     for (lib, sub) in subs.iter().enumerate() {
-        let Some(assets) = sub.get("a").and_then(|a| a.as_array()) else { continue };
+        let Some(assets) = sub.get("a").and_then(|a| a.as_array()) else {
+            continue;
+        };
         for (asset, a) in assets.iter().enumerate() {
             if let Some(s) = a.as_str() {
                 let seg = s.rsplit('.').next().unwrap_or(s).replace('_', " ");

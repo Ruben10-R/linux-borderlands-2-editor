@@ -96,14 +96,18 @@ fn parse_entries(data: &[u8]) -> Result<Vec<Entry>> {
                 need(vstart, 4)?;
                 4 + be32(&data[vstart..vstart + 4]) as usize
             }
-            other => {
-                return Err(SaveError::Proto(format!("profile: bad data type {other}")))
-            }
+            other => return Err(SaveError::Proto(format!("profile: bad data type {other}"))),
         };
         need(vstart, vlen + 1)?; // value + end byte
         let value = data[vstart..vstart + vlen].to_vec();
         let end_byte = data[vstart + vlen];
-        entries.push(Entry { start_byte, id, data_type, value, end_byte });
+        entries.push(Entry {
+            start_byte,
+            id,
+            data_type,
+            value,
+            end_byte,
+        });
         pos = vstart + vlen + 1;
     }
     Ok(entries)
@@ -142,8 +146,8 @@ fn decompress(raw: &[u8]) -> Result<Vec<u8>> {
 
 /// Recompress inner TLV bytes into the SHA1+LZO container.
 fn compress(inner: &[u8]) -> Result<Vec<u8>> {
-    let compressed =
-        lzokay_native::compress(inner).map_err(|e| SaveError::Lzo(format!("profile compress: {e}")))?;
+    let compressed = lzokay_native::compress(inner)
+        .map_err(|e| SaveError::Lzo(format!("profile compress: {e}")))?;
     let mut hashed = Vec::with_capacity(4 + compressed.len());
     hashed.extend_from_slice(&(inner.len() as u32).to_be_bytes());
     hashed.extend_from_slice(&compressed);
@@ -164,7 +168,9 @@ impl ProfileFile {
             return Err(SaveError::Sha1Mismatch);
         }
         let inner = decompress(raw)?;
-        Ok(Self { entries: parse_entries(&inner)? })
+        Ok(Self {
+            entries: parse_entries(&inner)?,
+        })
     }
 
     /// Read and decode a `profile.bin` from disk.
@@ -204,7 +210,9 @@ impl ProfileFile {
     fn int32(&self, id: u32) -> Option<i32> {
         let e = self.entry(id)?;
         if e.data_type == DT_INT32 && e.value.len() == 4 {
-            Some(i32::from_be_bytes([e.value[0], e.value[1], e.value[2], e.value[3]]))
+            Some(i32::from_be_bytes([
+                e.value[0], e.value[1], e.value[2], e.value[3],
+            ]))
         } else {
             None
         }
@@ -261,7 +269,10 @@ impl ProfileFile {
         if e.data_type != DT_BINARY || e.value.len() < 4 {
             return None;
         }
-        e.value[4..].chunks_exact(3).find(|c| c[0] == GOLDEN_SOURCE_SHIFT).map(|c| c[1])
+        e.value[4..]
+            .chunks_exact(3)
+            .find(|c| c[0] == GOLDEN_SOURCE_SHIFT)
+            .map(|c| c[1])
     }
 
     /// (unlocked_bytes, total_bytes) of the customization-unlock blob, if present.
@@ -328,7 +339,13 @@ mod tests {
 
     fn synthetic() -> Vec<Entry> {
         vec![
-            Entry { start_byte: 1, id: 2, data_type: DT_INT32, value: vec![0, 0, 0, 5], end_byte: 0 },
+            Entry {
+                start_byte: 1,
+                id: 2,
+                data_type: DT_INT32,
+                value: vec![0, 0, 0, 5],
+                end_byte: 0,
+            },
             Entry {
                 start_byte: 2,
                 id: ID_GOLDEN_KEYS,
@@ -337,10 +354,34 @@ mod tests {
                 value: vec![0, 0, 0, 6, 0, 3, 0, 173, 1, 0],
                 end_byte: 0,
             },
-            Entry { start_byte: 2, id: ID_BADASS_RANK1, data_type: DT_INT32, value: vec![0, 0, 0, 200], end_byte: 0 },
-            Entry { start_byte: 2, id: ID_BADASS_RANK2, data_type: DT_INT32, value: vec![0, 0, 0, 100], end_byte: 0 },
-            Entry { start_byte: 2, id: ID_BADASS_TOKENS_AVAILABLE, data_type: DT_INT32, value: vec![0, 0, 0, 0], end_byte: 0 },
-            Entry { start_byte: 2, id: ID_BADASS_TOKENS_EARNED, data_type: DT_INT32, value: vec![0, 0, 0, 30], end_byte: 0 },
+            Entry {
+                start_byte: 2,
+                id: ID_BADASS_RANK1,
+                data_type: DT_INT32,
+                value: vec![0, 0, 0, 200],
+                end_byte: 0,
+            },
+            Entry {
+                start_byte: 2,
+                id: ID_BADASS_RANK2,
+                data_type: DT_INT32,
+                value: vec![0, 0, 0, 100],
+                end_byte: 0,
+            },
+            Entry {
+                start_byte: 2,
+                id: ID_BADASS_TOKENS_AVAILABLE,
+                data_type: DT_INT32,
+                value: vec![0, 0, 0, 0],
+                end_byte: 0,
+            },
+            Entry {
+                start_byte: 2,
+                id: ID_BADASS_TOKENS_EARNED,
+                data_type: DT_INT32,
+                value: vec![0, 0, 0, 30],
+                end_byte: 0,
+            },
         ]
     }
 
@@ -370,7 +411,11 @@ mod tests {
     fn tlv_roundtrips_byte_exact() {
         let entries = synthetic();
         let bytes = serialize_entries(&entries);
-        assert_eq!(parse_entries(&bytes).unwrap(), entries, "TLV parse∘serialize is identity");
+        assert_eq!(
+            parse_entries(&bytes).unwrap(),
+            entries,
+            "TLV parse∘serialize is identity"
+        );
     }
 
     #[test]
@@ -398,7 +443,11 @@ mod tests {
         };
         let inner = decompress(&raw).unwrap();
         let entries = parse_entries(&inner).unwrap();
-        assert_eq!(serialize_entries(&entries), inner, "TLV must reproduce the real inner bytes");
+        assert_eq!(
+            serialize_entries(&entries),
+            inner,
+            "TLV must reproduce the real inner bytes"
+        );
         let mut p = ProfileFile::from_bytes(&raw).unwrap();
         eprintln!(
             "golden profile: {} entries, golden keys {:?}, badass rank {:?}, tokens {:?}",
@@ -410,18 +459,27 @@ mod tests {
         // Editing golden keys on the real profile must succeed, self-verify, and
         // read back — without changing the entry count or badass rank.
         let rank_before = p.badass_rank();
-        p.set_golden_keys(80).expect("set golden keys on real profile");
+        p.set_golden_keys(80)
+            .expect("set golden keys on real profile");
         let out = p.to_bytes().expect("real profile self-verify");
         let re = ProfileFile::from_bytes(&out).unwrap();
-        assert_eq!(re.golden_keys(), Some(80), "golden keys persisted on real profile");
+        assert_eq!(
+            re.golden_keys(),
+            Some(80),
+            "golden keys persisted on real profile"
+        );
         assert_eq!(re.entries.len(), p.entries.len(), "entry count preserved");
         assert_eq!(re.badass_rank(), rank_before, "badass rank untouched");
         eprintln!("golden profile: set golden keys -> {:?}", re.golden_keys());
 
         // Customizations unlock-all on the real profile, if it has the entry.
-        eprintln!("golden profile: customizations {:?}", p.customization_stats());
+        eprintln!(
+            "golden profile: customizations {:?}",
+            p.customization_stats()
+        );
         if p.customization_stats().is_some() {
-            p.set_all_customizations(true).expect("unlock all customizations");
+            p.set_all_customizations(true)
+                .expect("unlock all customizations");
             let out2 = p.to_bytes().expect("customization self-verify");
             let re2 = ProfileFile::from_bytes(&out2).unwrap();
             let (unlocked, total) = re2.customization_stats().unwrap();

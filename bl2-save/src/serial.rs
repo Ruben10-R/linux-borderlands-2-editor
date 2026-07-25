@@ -16,8 +16,12 @@ const ITEM_STRUCT_VERSION: u8 = 7; // BL2
 // Bit widths of each packed field, indexed by is_weapon (0 = item, 1 = weapon):
 // [set, type, balance, manufacturer, grade, game_stage, then 11 parts].
 const SIZES: [[u32; 17]; 2] = [
-    [8, 17, 20, 11, 7, 7, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16],
-    [8, 13, 20, 11, 7, 7, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17],
+    [
+        8, 17, 20, 11, 7, 7, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16,
+    ],
+    [
+        8, 13, 20, 11, 7, 7, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
+    ],
 ];
 // (type, balance, manufacturer) "lib" bit widths, indexed by is_weapon.
 const HEADER_BITS: [[u32; 3]; 2] = [[8, 10, 7], [6, 10, 7]];
@@ -59,23 +63,41 @@ impl ItemSerial {
 
     /// Manufacturer name (e.g. "Jakobs"), if resolvable from the GameInfo slice.
     pub fn manufacturer_name(&self) -> Option<String> {
-        crate::gameinfo::name("Manufacturers", self.set, self.manufacturer.lib, self.manufacturer.asset)
+        crate::gameinfo::name(
+            "Manufacturers",
+            self.set,
+            self.manufacturer.lib,
+            self.manufacturer.asset,
+        )
     }
 
     /// Weapon/item type name (e.g. "Jakobs Pistol"), if resolvable.
     pub fn type_name(&self) -> Option<String> {
-        let category = if self.is_weapon { "WeaponTypes" } else { "ItemTypes" };
+        let category = if self.is_weapon {
+            "WeaponTypes"
+        } else {
+            "ItemTypes"
+        };
         crate::gameinfo::name(category, self.set, self.item_type.lib, self.item_type.asset)
     }
 
     /// Balance-definition name (the item's base/family), if resolvable.
     pub fn balance_name(&self) -> Option<String> {
-        crate::gameinfo::name("BalanceDefs", self.set, self.balance.lib, self.balance.asset)
+        crate::gameinfo::name(
+            "BalanceDefs",
+            self.set,
+            self.balance.lib,
+            self.balance.asset,
+        )
     }
 
     /// Resolved name for each part slot (None where empty or unknown).
     pub fn part_names(&self) -> Vec<Option<String>> {
-        let category = if self.is_weapon { "WeaponParts" } else { "ItemParts" };
+        let category = if self.is_weapon {
+            "WeaponParts"
+        } else {
+            "ItemParts"
+        };
         self.parts
             .iter()
             .map(|p| p.and_then(|r| crate::gameinfo::name(category, self.set, r.lib, r.asset)))
@@ -278,12 +300,24 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn b64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(B64[(n >> 18 & 63) as usize] as char);
         out.push(B64[(n >> 12 & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { B64[(n >> 6 & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            B64[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -328,7 +362,8 @@ pub(crate) fn from_code(code: &str) -> Result<(Vec<u8>, bool)> {
         .strip_prefix("BL2(")
         .and_then(|s| s.strip_suffix(')'))
         .ok_or_else(|| SaveError::Proto("not a BL2(...) item code".into()))?;
-    let raw = b64_decode(inner).ok_or_else(|| SaveError::Proto("bad base64 in item code".into()))?;
+    let raw =
+        b64_decode(inner).ok_or_else(|| SaveError::Proto("bad base64 in item code".into()))?;
     let (is_weapon, values, _) = unwrap_raw(&raw)?;
     let key = crc32fast::hash(&raw) as i32;
     Ok((wrap_raw(is_weapon, &values, key), is_weapon))
@@ -337,7 +372,10 @@ pub(crate) fn from_code(code: &str) -> Result<(Vec<u8>, bool)> {
 // ---- structured decode ----
 
 fn split(x: u64, bits: u32) -> PartRef {
-    PartRef { lib: (x >> bits) as u32, asset: (x & ((1u64 << bits) - 1)) as u32 }
+    PartRef {
+        lib: (x >> bits) as u32,
+        asset: (x & ((1u64 << bits) - 1)) as u32,
+    }
 }
 
 /// Decode a serial byte blob into structured fields.
@@ -372,7 +410,9 @@ mod tests {
     #[test]
     fn base64_roundtrips_all_lengths() {
         for len in 0..40usize {
-            let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37).wrapping_add(3)).collect();
+            let data: Vec<u8> = (0..len)
+                .map(|i| (i as u8).wrapping_mul(37).wrapping_add(3))
+                .collect();
             let enc = b64_encode(&data);
             assert_eq!(b64_decode(&enc).unwrap(), data, "len {len}");
         }
@@ -382,8 +422,23 @@ mod tests {
     #[test]
     fn item_code_roundtrips_values() {
         let values: Vec<Option<u64>> = vec![
-            Some(0), Some(0x1234), Some(0x2ABC), Some(0x055), Some(30), Some(30),
-            Some(0x101), Some(0x202), None, None, None, None, None, None, None, None, None,
+            Some(0),
+            Some(0x1234),
+            Some(0x2ABC),
+            Some(0x055),
+            Some(30),
+            Some(30),
+            Some(0x101),
+            Some(0x202),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ];
         for is_weapon in [false, true] {
             let serial = wrap_raw(is_weapon, &values, -0x2BADC0DE);
@@ -403,13 +458,23 @@ mod tests {
     fn raw_roundtrip_reproduces_serial() {
         // A plausible item value list (17 fields). wrap(unwrap(x)) must equal x.
         let values: Vec<Option<u64>> = vec![
-            Some(0),     // set
+            Some(0),      // set
             Some(0x1234), // type
             Some(0x2ABC), // balance
             Some(0x055),  // manufacturer
             Some(30),     // grade
             Some(30),     // stage
-            Some(0x101), Some(0x202), None, None, None, None, None, None, None, None, None,
+            Some(0x101),
+            Some(0x202),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ];
         for is_weapon in [false, true] {
             let key: i32 = -0x2BADC0DE;
@@ -426,8 +491,23 @@ mod tests {
     #[test]
     fn structured_decode_reads_fields() {
         let values: Vec<Option<u64>> = vec![
-            Some(0), Some(0x1234), Some(0x2ABC), Some(0x055), Some(28), Some(31),
-            Some(0x101), None, None, None, None, None, None, None, None, None, None,
+            Some(0),
+            Some(0x1234),
+            Some(0x2ABC),
+            Some(0x055),
+            Some(28),
+            Some(31),
+            Some(0x101),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ];
         let serial = wrap_raw(true, &values, 12345);
         let it = unwrap(&serial).unwrap();
@@ -435,6 +515,12 @@ mod tests {
         assert_eq!(it.stage, Some(31));
         assert_eq!(it.grade, Some(28));
         // type with weapon header bits (6): lib = 0x1234 >> 6, asset = 0x1234 & 0x3F
-        assert_eq!(it.item_type, PartRef { lib: 0x1234 >> 6, asset: 0x1234 & 0x3F });
+        assert_eq!(
+            it.item_type,
+            PartRef {
+                lib: 0x1234 >> 6,
+                asset: 0x1234 & 0x3F
+            }
+        );
     }
 }

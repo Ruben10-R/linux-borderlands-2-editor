@@ -150,7 +150,9 @@ pub fn field_help(number: u64) -> &'static str {
         53 => "Non-weapon backpack items (shields, grenades, relics, class mods).",
         54 => "Weapons in your backpack.",
         55 => "Flag: the \u{201c}awesome skill\u{201d} (badass) toggle disabled.",
-        56 => "Bank slot count — edit via Bank slots in the General tab (kept in sync with the SDU).",
+        56 => {
+            "Bank slot count — edit via Bank slots in the General tab (kept in sync with the SDU)."
+        }
         57 => "Equipped vehicle skins per family — edit in the Vehicle tab.",
         58 => "Vehicle steering mode (0 = default, 1 = alternate).",
         _ => "",
@@ -221,14 +223,20 @@ pub fn parse_fields(buf: &[u8]) -> Result<Vec<Field>> {
                 pos += len;
             }
             5 => pos += 4,
-            other => {
-                return Err(SaveError::Proto(format!("unsupported wire type {other}")))
-            }
+            other => return Err(SaveError::Proto(format!("unsupported wire type {other}"))),
         }
         if pos > buf.len() {
-            return Err(SaveError::Proto("field value runs past end of buffer".into()));
+            return Err(SaveError::Proto(
+                "field value runs past end of buffer".into(),
+            ));
         }
-        fields.push(Field { number, wire_type, tag_start, val_start, end: pos });
+        fields.push(Field {
+            number,
+            wire_type,
+            tag_start,
+            val_start,
+            end: pos,
+        });
     }
     Ok(fields)
 }
@@ -321,14 +329,18 @@ pub(crate) fn read_varint_value(buf: &[u8], start: usize) -> Option<i64> {
 
 /// Read the first varint field with the given number (e.g. level=2, xp=3).
 pub fn read_varint_field(buf: &[u8], fields: &[Field], number: u64) -> Option<i64> {
-    let f = fields.iter().find(|f| f.number == number && f.wire_type == 0)?;
+    let f = fields
+        .iter()
+        .find(|f| f.number == number && f.wire_type == 0)?;
     let mut p = f.val_start;
     read_varint(buf, &mut p).ok().map(|v| v as i64)
 }
 
 /// Read the first length-delimited field as a UTF-8 string (e.g. class=1).
 pub fn read_string_field(buf: &[u8], fields: &[Field], number: u64) -> Option<String> {
-    let f = fields.iter().find(|f| f.number == number && f.wire_type == 2)?;
+    let f = fields
+        .iter()
+        .find(|f| f.number == number && f.wire_type == 2)?;
     let mut p = f.val_start;
     let len = read_varint(buf, &mut p).ok()? as usize;
     Some(String::from_utf8_lossy(&buf[p..p + len]).into_owned())
@@ -443,7 +455,10 @@ pub fn rewrite_varint_field(
     number: u64,
     new_value: i64,
 ) -> Result<Vec<u8>> {
-    if !fields.iter().any(|f| f.number == number && f.wire_type == 0) {
+    if !fields
+        .iter()
+        .any(|f| f.number == number && f.wire_type == 0)
+    {
         return Err(SaveError::Proto(format!(
             "varint field {number} not present in save"
         )));
@@ -475,8 +490,13 @@ pub fn rewrite_string_field(
     number: u64,
     new_value: &str,
 ) -> Result<Vec<u8>> {
-    if !fields.iter().any(|f| f.number == number && f.wire_type == 2) {
-        return Err(SaveError::Proto(format!("string field {number} not present")));
+    if !fields
+        .iter()
+        .any(|f| f.number == number && f.wire_type == 2)
+    {
+        return Err(SaveError::Proto(format!(
+            "string field {number} not present"
+        )));
     }
     let mut out = Vec::with_capacity(buf.len());
     let mut done = false;
@@ -564,11 +584,19 @@ mod tests {
         let m2 = upsert_varint_field(&m, &fs, 2, 42);
         let fs2 = parse_fields(&m2).unwrap();
         assert_eq!(read_varint_field(&m2, &fs2, 2), Some(42));
-        assert_eq!(read_varint_field(&m2, &fs2, 9), Some(7), "other field preserved");
+        assert_eq!(
+            read_varint_field(&m2, &fs2, 9),
+            Some(7),
+            "other field preserved"
+        );
 
         let m3 = upsert_varint_field(&m, &fs, 3, 99);
         let fs3 = parse_fields(&m3).unwrap();
-        assert_eq!(read_varint_field(&m3, &fs3, 3), Some(99), "absent field appended");
+        assert_eq!(
+            read_varint_field(&m3, &fs3, 3),
+            Some(99),
+            "absent field appended"
+        );
     }
 
     #[test]
@@ -588,7 +616,11 @@ mod tests {
             .map(|f| String::from_utf8(wire2_content(&m2, f).unwrap().to_vec()).unwrap())
             .collect();
         assert_eq!(got, vals);
-        assert_eq!(read_varint_field(&m2, &fs2, 2), Some(5), "field 2 untouched");
+        assert_eq!(
+            read_varint_field(&m2, &fs2, 2),
+            Some(5),
+            "field 2 untouched"
+        );
     }
 
     #[test]
@@ -600,7 +632,10 @@ mod tests {
         emit_varint_field(&mut b, 2, 5);
         emit_varint_field(&mut b, 3, 8);
         assert!(only_fields_changed(&a, &b, &[3]).is_ok());
-        assert!(only_fields_changed(&a, &b, &[2]).is_err(), "field 3 changed but not allowed");
+        assert!(
+            only_fields_changed(&a, &b, &[2]).is_err(),
+            "field 3 changed but not allowed"
+        );
     }
 
     #[test]

@@ -31,7 +31,11 @@ pub fn catalog() -> &'static [Station] {
                         Some(Station {
                             rn: s.get("rn")?.as_str()?.to_string(),
                             name: s.get("name")?.as_str()?.to_string(),
-                            pack: s.get("pack").and_then(Value::as_str).unwrap_or("").to_string(),
+                            pack: s
+                                .get("pack")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
                         })
                     })
                     .collect()
@@ -42,7 +46,10 @@ pub fn catalog() -> &'static [Station] {
 
 /// Display name for a stored `resource_name`, if known.
 pub fn display_name(resource_name: &str) -> Option<&'static str> {
-    catalog().iter().find(|s| s.rn == resource_name).map(|s| s.name.as_str())
+    catalog()
+        .iter()
+        .find(|s| s.rn == resource_name)
+        .map(|s| s.name.as_str())
 }
 
 #[cfg(test)]
@@ -52,7 +59,9 @@ mod tests {
     #[test]
     fn catalog_and_display_names() {
         assert!(catalog().len() > 50, "station catalog populated");
-        assert!(catalog().iter().all(|s| !s.rn.is_empty() && !s.name.is_empty()));
+        assert!(catalog()
+            .iter()
+            .all(|s| !s.rn.is_empty() && !s.name.is_empty()));
         assert_eq!(display_name("SouthernShelfTown"), Some("Southern Shelf"));
         assert!(display_name("no_such_station").is_none());
     }

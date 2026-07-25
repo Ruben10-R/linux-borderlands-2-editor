@@ -86,9 +86,7 @@ enum Cmd {
         w: WriteOpts,
     },
     /// List head/skin options for the save's class (name → asset path).
-    Customizations {
-        sav: PathBuf,
-    },
+    Customizations { sav: PathBuf },
     /// Set the equipped head and skin by asset path (see `customizations`).
     SetHeadSkin {
         sav: PathBuf,
@@ -98,9 +96,7 @@ enum Cmd {
         w: WriteOpts,
     },
     /// Show account profile.bin info (Golden Keys, Badass Rank, tokens).
-    ProfileInfo {
-        profile: PathBuf,
-    },
+    ProfileInfo { profile: PathBuf },
     /// Set SHiFT Golden Keys in a profile.bin (0–255).
     SetGoldenKeys {
         profile: PathBuf,
@@ -130,9 +126,7 @@ enum Cmd {
         file: PathBuf,
     },
     /// Dump every top-level protobuf field (read-only inspector).
-    Raw {
-        sav: PathBuf,
-    },
+    Raw { sav: PathBuf },
     /// Set playthroughs completed (0-3): 1 unlocks TVHM, 2 unlocks UVHM.
     SetPlaythroughs {
         sav: PathBuf,
@@ -182,9 +176,7 @@ enum Cmd {
         w: WriteOpts,
     },
     /// Print shareable BL2(...) codes for every item (Gibbed-compatible).
-    ExportCodes {
-        sav: PathBuf,
-    },
+    ExportCodes { sav: PathBuf },
     /// Import one or more BL2(...) item codes into the backpack (or bank).
     ImportCode {
         sav: PathBuf,
@@ -237,9 +229,13 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetMoney { sav, amount, w } => {
             edit(&sav, w, "money", |s| s.money(), |s| s.set_money(amount))
         }
-        Cmd::SetEridium { sav, amount, w } => {
-            edit(&sav, w, "eridium", |s| s.eridium(), |s| s.set_eridium(amount))
-        }
+        Cmd::SetEridium { sav, amount, w } => edit(
+            &sav,
+            w,
+            "eridium",
+            |s| s.eridium(),
+            |s| s.set_eridium(amount),
+        ),
         Cmd::SetSeraph { sav, amount, w } => {
             edit(&sav, w, "seraph", |s| s.seraph(), |s| s.set_seraph(amount))
         }
@@ -253,12 +249,22 @@ fn run() -> Result<(), SaveError> {
             |s| s.level().unwrap_or(0),
             |s| s.set_level(level),
         ),
-        Cmd::SetXp { sav, xp, w } => {
-            edit(&sav, w, "xp", |s| s.xp().unwrap_or(0), |s| s.set_xp(xp))
-        }
-        Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
+        Cmd::SetXp { sav, xp, w } => edit(&sav, w, "xp", |s| s.xp().unwrap_or(0), |s| s.set_xp(xp)),
+        Cmd::SetItemLevels {
+            sav,
+            level,
+            force,
+            w,
+        } => cmd_set_item_levels(&sav, level, force, w),
         Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
-        Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
+        Cmd::SetPart {
+            sav,
+            id,
+            slot,
+            lib,
+            asset,
+            w,
+        } => cmd_set_part(&sav, id, slot, lib, asset, w),
         Cmd::SetPlaythroughs { sav, count, w } => edit(
             &sav,
             w,
@@ -306,7 +312,9 @@ fn run() -> Result<(), SaveError> {
         Cmd::ProfileInfo { profile } => cmd_profile_info(&profile),
         Cmd::SetGoldenKeys { profile, count, w } => cmd_set_golden_keys(&profile, count, w),
         Cmd::SetBadassRank { profile, rank, w } => cmd_set_badass_rank(&profile, rank, w),
-        Cmd::UnlockCustomizations { profile, lock, w } => cmd_unlock_customizations(&profile, !lock, w),
+        Cmd::UnlockCustomizations { profile, lock, w } => {
+            cmd_unlock_customizations(&profile, !lock, w)
+        }
         Cmd::CodeIndex { file } => cmd_code_index(&file),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
@@ -324,7 +332,10 @@ fn cmd_part_catalog(sav: &Path, id: usize, filter: &str) -> Result<(), SaveError
     let needle = filter.to_lowercase();
     let cat = bl2_save::parts_catalog(item.serial.is_weapon, item.serial.set);
     println!("== parts for item {id} ({} matches) ==", cat.len());
-    for p in cat.iter().filter(|p| needle.is_empty() || p.name.to_lowercase().contains(&needle)) {
+    for p in cat
+        .iter()
+        .filter(|p| needle.is_empty() || p.name.to_lowercase().contains(&needle))
+    {
         println!("  {}:{}  {}", p.lib, p.asset, p.name);
     }
     Ok(())
@@ -341,7 +352,14 @@ fn cmd_set_part(
     let mut s = SaveFile::load(sav)?;
     let changed = s.set_item_part(id, slot, lib, asset)?;
     println!("== set part ==");
-    println!("  item {id} slot {slot} -> {lib}:{asset}  ({})", if changed { "changed" } else { "no change — empty slot or bad id" });
+    println!(
+        "  item {id} slot {slot} -> {lib}:{asset}  ({})",
+        if changed {
+            "changed"
+        } else {
+            "no change — empty slot or bad id"
+        }
+    );
     if !changed || w.dry_run {
         if w.dry_run {
             println!("  dry-run : nothing written");
@@ -363,7 +381,10 @@ fn cmd_set_part(
 fn cmd_unlock_stations(sav: &Path, w: WriteOpts) -> Result<(), SaveError> {
     let mut s = SaveFile::load(sav)?;
     let before = s.visited_stations().len();
-    let all: Vec<String> = bl2_save::stations_catalog().iter().map(|st| st.rn.clone()).collect();
+    let all: Vec<String> = bl2_save::stations_catalog()
+        .iter()
+        .map(|st| st.rn.clone())
+        .collect();
     s.set_visited_stations(&all)?;
     let out = w.out.as_deref().unwrap_or(sav);
     println!("== unlock stations ==");
@@ -421,9 +442,24 @@ fn cmd_customizations(sav: &Path) -> Result<(), SaveError> {
 fn cmd_profile_info(profile: &Path) -> Result<(), SaveError> {
     let p = ProfileFile::load(profile)?;
     println!("== profile {} ==", profile.display());
-    println!("  golden keys : {}", p.golden_keys().map(|k| k.to_string()).unwrap_or_else(|| "0 (none)".into()));
-    println!("  badass rank : {}", p.badass_rank().map(|r| r.to_string()).unwrap_or_else(|| "?".into()));
-    println!("  badass tokens (unspent) : {}", p.badass_tokens().map(|t| t.to_string()).unwrap_or_else(|| "?".into()));
+    println!(
+        "  golden keys : {}",
+        p.golden_keys()
+            .map(|k| k.to_string())
+            .unwrap_or_else(|| "0 (none)".into())
+    );
+    println!(
+        "  badass rank : {}",
+        p.badass_rank()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "?".into())
+    );
+    println!(
+        "  badass tokens (unspent) : {}",
+        p.badass_tokens()
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "?".into())
+    );
     Ok(())
 }
 
@@ -455,7 +491,10 @@ fn cmd_unlock_customizations(profile: &Path, unlock: bool, w: WriteOpts) -> Resu
     p.set_all_customizations(unlock)?;
     let out = w.out.as_deref().unwrap_or(profile);
     let (u, total) = p.customization_stats().unwrap_or((0, 0));
-    println!("== {} customizations ==", if unlock { "unlock" } else { "lock" });
+    println!(
+        "== {} customizations ==",
+        if unlock { "unlock" } else { "lock" }
+    );
     println!("  input   : {}", profile.display());
     println!("  result  : {u} / {total} unlocked");
     if w.dry_run {
@@ -481,7 +520,10 @@ fn cmd_set_badass_rank(profile: &Path, rank: i32, w: WriteOpts) -> Result<(), Sa
     let out = w.out.as_deref().unwrap_or(profile);
     println!("== set badass rank ==");
     println!("  input   : {}", profile.display());
-    println!("  rank    : {before} -> {after}  (tokens available: {})", p.badass_tokens().unwrap_or(0));
+    println!(
+        "  rank    : {before} -> {after}  (tokens available: {})",
+        p.badass_tokens().unwrap_or(0)
+    );
     if w.dry_run {
         println!("  dry-run : nothing written");
         return Ok(());
@@ -530,7 +572,11 @@ fn cmd_raw(sav: &Path) -> Result<(), SaveError> {
     let s = SaveFile::load(sav)?;
     println!("== raw protobuf fields of {} ==", sav.display());
     for f in s.raw_fields()? {
-        let name = if f.name.is_empty() { format!("#{}", f.number) } else { f.name.to_string() };
+        let name = if f.name.is_empty() {
+            format!("#{}", f.number)
+        } else {
+            f.name.to_string()
+        };
         println!("  {name:<24} {:<11} {}", f.kind, f.preview);
     }
     Ok(())
@@ -565,7 +611,11 @@ fn cmd_import_code(sav: &Path, code: &str, bank: bool, w: WriteOpts) -> Result<(
     println!(
         "  added   : {added} item(s) into {}{}",
         if bank { "bank" } else { "backpack" },
-        if failed > 0 { format!(" ({failed} failed)") } else { String::new() }
+        if failed > 0 {
+            format!(" ({failed} failed)")
+        } else {
+            String::new()
+        }
     );
     if w.dry_run {
         println!("  dry-run : nothing written");

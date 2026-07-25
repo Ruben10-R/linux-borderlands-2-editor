@@ -2,7 +2,10 @@
 //! (served by `docker compose up`). Both construct the same `bl2_gui::App`.
 
 // On Windows release builds, don't open a console window behind the GUI.
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 // ---- native ----
 /// Our original app icon: a gold hexagon (matches the in-app emblem) on
@@ -31,7 +34,11 @@ fn app_icon() -> eframe::egui::IconData {
             }
         }
     }
-    eframe::egui::IconData { rgba, width: SIZE, height: SIZE }
+    eframe::egui::IconData {
+        rgba,
+        width: SIZE,
+        height: SIZE,
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
