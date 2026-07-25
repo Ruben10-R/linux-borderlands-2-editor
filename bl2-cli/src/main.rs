@@ -865,8 +865,9 @@ fn cmd_items(sav: &Path, show_parts: bool) -> Result<(), SaveError> {
         let balance = ser
             .balance_name()
             .unwrap_or_else(|| format!("bal {}:{}", ser.balance.lib, ser.balance.asset));
+        let name = ser.display_name().unwrap_or_else(|| format!("{manu} {ty}"));
         println!(
-            "  [{:>2}] {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  {balance}",
+            "  [{:>2}] {loc:<8}  {kind:<6}  Lv {:<3}  {name:<26}  ({manu} {ty}, {balance})",
             it.id,
             ser.stage.unwrap_or(0),
         );

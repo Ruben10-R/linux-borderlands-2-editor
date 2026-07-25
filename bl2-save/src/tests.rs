@@ -2,6 +2,24 @@
 
 use super::*;
 
+/// Generated display names assemble from the item's title + prefix parts, the
+/// way the game does. Uses real shareable item codes (gear data, not personal).
+#[test]
+fn display_name_from_code() {
+    let name = |code: &str| {
+        let (raw, _w) = crate::serial::from_code(code).unwrap();
+        crate::serial::unwrap(&raw).unwrap().display_name()
+    };
+    assert_eq!(
+        name("BL2(hwAAAACDRQCHxwFABlEo4MJohVEAIwHG///////////nwvhAEgjj)").as_deref(),
+        Some("Fast Widow Maker"),
+    );
+    assert_eq!(
+        name("BL2(hwAAAADTcACE6IFBBhEITIJRAOMAZgVMBZj///////9TgskEswPm)").as_deref(),
+        Some("Gearbox Callipeen"),
+    );
+}
+
 fn hex_to_bytes(s: &str) -> Vec<u8> {
     (0..s.len())
         .step_by(2)

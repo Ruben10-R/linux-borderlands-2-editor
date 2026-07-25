@@ -159,7 +159,10 @@ struct ItemView {
     /// False for grade-≤1 "no-level" items — locked (leveling can break them).
     levelable: bool,
     level: i64,
+    /// Manufacturer + type (e.g. "Jakobs Pistol") — the fallback label.
     name: String,
+    /// The game's generated name (e.g. "Fast Widow Maker"), or the fallback.
+    display: String,
     /// Balance + parts breakdown, shown on hover.
     details: String,
     /// Resolved header fields, for the item detail form.
@@ -222,6 +225,9 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
                 levelable: ser.is_levelable(),
                 level: ser.stage.unwrap_or(0),
                 name: format!("{manufacturer} {type_name}").trim().to_string(),
+                display: ser
+                    .display_name()
+                    .unwrap_or_else(|| format!("{manufacturer} {type_name}").trim().to_string()),
                 details,
                 type_name,
                 balance,

@@ -91,6 +91,27 @@ impl ItemSerial {
         )
     }
 
+    /// The item's generated in-game name (e.g. "Fast Widow Maker"), assembled
+    /// from its title (slot 10) + prefix (slot 9) parts the way the game does.
+    /// `None` if the title part carries no name word (then callers fall back to
+    /// manufacturer + type).
+    pub fn display_name(&self) -> Option<String> {
+        let category = if self.is_weapon {
+            "WeaponParts"
+        } else {
+            "ItemParts"
+        };
+        let word = |slot: usize| -> Option<String> {
+            let r = self.parts.get(slot).copied().flatten()?;
+            crate::gameinfo::name_part_word(category, self.set, r.lib, r.asset)
+        };
+        let title = word(10)?;
+        Some(match word(9) {
+            Some(prefix) => format!("{prefix} {title}"),
+            None => title,
+        })
+    }
+
     /// Resolved name for each part slot (None where empty or unknown).
     pub fn part_names(&self) -> Vec<Option<String>> {
         let category = if self.is_weapon {

@@ -530,7 +530,8 @@ pub(super) fn items_tab(
                             );
                         });
                     }
-                    ui.monospace(&v.name).on_hover_text(&v.details);
+                    ui.label(egui::RichText::new(&v.display).strong())
+                        .on_hover_text(format!("{}\n{}", v.name, v.details));
                     if ui.small_button("Parts").clicked() {
                         open_parts = Some(v.id);
                     }

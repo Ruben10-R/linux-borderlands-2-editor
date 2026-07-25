@@ -54,6 +54,20 @@ pub(crate) fn catalog(category: &str, set: u32) -> Vec<(u32, u32, String)> {
     out
 }
 
+const NAMEPARTS: &str = include_str!("nameparts_data.json");
+
+fn nameparts() -> &'static Value {
+    static NP: OnceLock<Value> = OnceLock::new();
+    NP.get_or_init(|| serde_json::from_str(NAMEPARTS).unwrap_or(Value::Null))
+}
+
+/// The generated-name *word* for a title/prefix part (e.g. "Widow Maker",
+/// "Fast"), keyed by the part's full asset path — the same map the game uses.
+pub(crate) fn name_part_word(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> {
+    let path = asset_path(category, set, lib, asset)?;
+    nameparts().get(&path)?.as_str().map(str::to_string)
+}
+
 /// A short, human-friendly name for a ref (e.g. "Jakobs", "Jakobs Pistol"),
 /// or None if the ref isn't in our embedded slice.
 pub(crate) fn name(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> {
