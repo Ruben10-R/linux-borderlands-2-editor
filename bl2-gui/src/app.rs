@@ -18,6 +18,10 @@ pub struct App {
     theme: theme::Theme,
     show_help: bool,
     tab: Tab,
+    /// Web-only: file bytes picked by the browser Open dialog (async), consumed
+    /// next frame. `Rc<RefCell<..>>` because wasm is single-threaded.
+    #[cfg(target_arch = "wasm32")]
+    pending_open: std::rc::Rc<std::cell::RefCell<Option<(String, Vec<u8>)>>>,
 }
 
 /// A loaded `profile.bin` plus its editable scratch values.
@@ -297,54 +301,132 @@ impl App {
         }
     }
 
-    /// Apply the edited scratch values and write them out (disk on native,
-    /// download on web), updating `status`.
-    fn save_current(&mut self) {
+    /// Push all scratch edits into the loaded save/profile (the shared pre-write
+    /// step for Save and Save As). Does not touch the disk.
+    fn apply_all(&mut self) -> Result<(), String> {
         if let Some(pdoc) = self.profile.as_mut() {
             if pdoc.golden_keys != pdoc.profile.golden_keys().unwrap_or(0) as i64 {
-                if let Err(e) = pdoc.profile.set_golden_keys(pdoc.golden_keys.clamp(0, 255) as u8) {
-                    self.status = Some((true, format!("edit failed: {e}")));
-                    return;
-                }
+                pdoc.profile
+                    .set_golden_keys(pdoc.golden_keys.clamp(0, 255) as u8)
+                    .map_err(|e| e.to_string())?;
             }
             if pdoc.badass_rank != pdoc.profile.badass_rank().unwrap_or(0) as i64 {
-                if let Err(e) = pdoc.profile.set_badass_rank(pdoc.badass_rank.clamp(0, MAX) as i32) {
-                    self.status = Some((true, format!("edit failed: {e}")));
-                    return;
-                }
+                pdoc.profile
+                    .set_badass_rank(pdoc.badass_rank.clamp(0, MAX) as i32)
+                    .map_err(|e| e.to_string())?;
             }
             if let Some(unlock) = pdoc.pending_customizations.take() {
-                if let Err(e) = pdoc.profile.set_all_customizations(unlock) {
-                    self.status = Some((true, format!("edit failed: {e}")));
-                    return;
-                }
+                pdoc.profile.set_all_customizations(unlock).map_err(|e| e.to_string())?;
             }
-            let status = persist_profile(pdoc);
             // Refresh scratch: rank snaps to the LUT and tokens/available change.
             pdoc.golden_keys = pdoc.profile.golden_keys().unwrap_or(0) as i64;
             pdoc.badass_rank = pdoc.profile.badass_rank().unwrap_or(0) as i64;
             pdoc.badass_tokens = pdoc.profile.badass_tokens().unwrap_or(0) as i64;
-            self.status = Some(status);
-            return;
+            return Ok(());
         }
-        let Some(doc) = self.doc.as_mut() else {
-            return;
-        };
-        if let Err(e) = apply_edits(doc) {
+        if let Some(doc) = self.doc.as_mut() {
+            apply_edits(doc).map_err(|e| e.to_string())?;
+            let edits: Vec<(usize, i64)> =
+                doc.items.iter().filter(|v| v.levelable).map(|v| (v.id, v.level)).collect();
+            for (id, lvl) in edits {
+                let _ = doc.save.set_item_level(id, lvl);
+            }
+            return Ok(());
+        }
+        Err("nothing loaded".into())
+    }
+
+    /// The current file's suggested name + freshly-encoded bytes (after apply).
+    /// Used by the native "Save As…" dialog.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn current_name(&self) -> String {
+        self.profile
+            .as_ref()
+            .map(|p| p.name.clone())
+            .or_else(|| self.doc.as_ref().map(|d| d.name.clone()))
+            .unwrap_or_default()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn encoded_bytes(&self) -> Result<Vec<u8>, String> {
+        if let Some(pdoc) = self.profile.as_ref() {
+            pdoc.profile.to_bytes().map_err(|e| e.to_string())
+        } else if let Some(doc) = self.doc.as_ref() {
+            doc.save.to_bytes().map_err(|e| e.to_string())
+        } else {
+            Err("nothing loaded".into())
+        }
+    }
+
+    /// Apply edits and write them out (disk on native, download on web).
+    fn save_current(&mut self) {
+        if let Err(e) = self.apply_all() {
             self.status = Some((true, format!("edit failed: {e}")));
             return;
         }
-        // Apply per-item level edits (levelable rows only).
-        let edits: Vec<(usize, i64)> = doc
-            .items
-            .iter()
-            .filter(|v| v.levelable)
-            .map(|v| (v.id, v.level))
-            .collect();
-        for (id, lvl) in edits {
-            let _ = doc.save.set_item_level(id, lvl);
+        if let Some(pdoc) = self.profile.as_mut() {
+            self.status = Some(persist_profile(pdoc));
+        } else if let Some(doc) = self.doc.as_mut() {
+            self.status = Some(persist(doc));
         }
-        self.status = Some(persist(doc));
+    }
+}
+
+// Native file dialogs (a real Open / Save As, backed by the OS picker).
+#[cfg(not(target_arch = "wasm32"))]
+impl App {
+    fn open_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("BL2 save / profile", &["sav", "bin"])
+            .pick_file()
+        {
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    let name =
+                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.load(name, Some(path), &bytes);
+                }
+                Err(e) => self.status = Some((true, format!("could not read: {e}"))),
+            }
+        }
+    }
+
+    fn save_as_dialog(&mut self) {
+        if let Err(e) = self.apply_all() {
+            self.status = Some((true, format!("edit failed: {e}")));
+            return;
+        }
+        let Some(path) =
+            rfd::FileDialog::new().set_file_name(self.current_name()).save_file()
+        else {
+            return;
+        };
+        match self.encoded_bytes() {
+            Ok(bytes) => match std::fs::write(&path, &bytes) {
+                Ok(()) => self.status = Some((false, format!("Saved to {}", path.display()))),
+                Err(e) => self.status = Some((true, format!("write failed: {e}"))),
+            },
+            Err(e) => self.status = Some((true, format!("encode failed: {e}"))),
+        }
+    }
+}
+
+// Web file open (browser picker → async read into a shared slot).
+#[cfg(target_arch = "wasm32")]
+impl App {
+    fn open_dialog(&mut self) {
+        let slot = self.pending_open.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(fh) = rfd::AsyncFileDialog::new()
+                .add_filter("BL2 save / profile", &["sav", "bin"])
+                .pick_file()
+                .await
+            {
+                let name = fh.file_name();
+                let bytes = fh.read().await;
+                *slot.borrow_mut() = Some((name, bytes));
+            }
+        });
     }
 }
 
@@ -461,6 +543,15 @@ impl eframe::App for App {
         theme::apply(&ctx, self.theme);
         self.handle_dropped(&ctx);
 
+        // Web: consume a file picked asynchronously by the browser Open dialog.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let picked = self.pending_open.borrow_mut().take();
+            if let Some((name, bytes)) = picked {
+                self.load(name, None, &bytes);
+            }
+        }
+
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             egui::Panel::bottom("drop_hint").show_inside(ui, |ui| {
                 ui.centered_and_justified(|ui| ui.label("⤵ Drop to load"));
@@ -496,9 +587,20 @@ impl eframe::App for App {
             ui.add_space(4.0);
             ui.separator();
 
+            // Open (OS file dialog on native, browser picker on web).
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("📂  Open file…").clicked() {
+                    self.open_dialog();
+                }
+                ui.weak("· or drag a .sav / profile.bin onto the window");
+            });
+            ui.add_space(4.0);
+            ui.separator();
+
             if self.doc.is_none() && self.profile.is_none() {
                 ui.add_space(8.0);
-                ui.label("Drag a character .sav or your account profile.bin onto this window.");
+                ui.label("Open or drag a character .sav or your account profile.bin.");
                 ui.add_space(2.0);
                 ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
                 if let Some((true, msg)) = &self.status {
@@ -520,7 +622,11 @@ impl eframe::App for App {
                     if ui.button(egui::RichText::new(label).strong()).clicked() {
                         self.save_current();
                     }
-                    ui.weak("· account profile · drag a .sav or profile.bin to load another");
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Save As…").clicked() {
+                        self.save_as_dialog();
+                    }
+                    ui.weak("· account profile");
                 });
                 if let Some((is_err, msg)) = &self.status {
                     let col = if *is_err { theme::DANGER } else { accent };
@@ -544,12 +650,15 @@ impl eframe::App for App {
                 if ui.button(egui::RichText::new(label).strong()).clicked() {
                     self.save_current();
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                if ui.button("Save As…").clicked() {
+                    self.save_as_dialog();
+                }
                 if cfg!(target_arch = "wasm32")
                     && ui.button("ⓘ  How to install this save").clicked()
                 {
                     self.show_help = true;
                 }
-                ui.weak("· drag another .sav to load it");
             });
             if let Some((is_err, msg)) = &self.status {
                 let col = if *is_err { theme::DANGER } else { accent };

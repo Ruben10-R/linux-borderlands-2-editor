@@ -8,6 +8,7 @@ FROM rust:1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libgl1-mesa-dev \
+    libgtk-3-dev \
     libxkbcommon-dev libxkbcommon-x11-dev \
     libwayland-dev \
     libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \

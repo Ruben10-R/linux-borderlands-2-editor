@@ -29,9 +29,12 @@ install needed).
 ./dist/bl2-editor        # launch the window
 ./install-desktop.sh     # (optional) add it to your applications menu
 ```
-In the app: **drag** a `.sav` or `profile.bin` onto the window → edit → click
-**Save** (writes back to the same file, keeping a `.bak`). No download/rewrite
-dance — it saves in place.
+In the app: **Open…** a `.sav` or `profile.bin` (or drag it onto the window) →
+edit → **Save** (writes back to the same file, keeping a `.bak`) or **Save As…**
+to choose a new location. No download/rewrite dance — it saves in place.
+
+> The native file dialogs use GTK; any Linux desktop already has the GTK 3
+> runtime (`libgtk-3-0`). The web build uses the browser's own file picker.
 
 ### Web app (browser)
 ```bash
