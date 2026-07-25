@@ -13,6 +13,7 @@
 //! # Ok::<(), bl2_save::SaveError>(())
 //! ```
 
+mod capacity;
 mod codec;
 mod customizations;
 mod error;
@@ -347,6 +348,34 @@ impl SaveFile {
     /// yet. Stored as a hidden "virtual item" (see [`SaveFile::set_op_level`]).
     pub fn op_level(&self) -> Option<i64> {
         items::read_op_level(&self.proto).ok().flatten()
+    }
+
+    /// Backpack slot count, if present (min 12, +3 per SDU).
+    pub fn backpack_size(&self) -> Option<i64> {
+        capacity::backpack_size(&self.proto)
+    }
+
+    /// Bank slot count (min 6, +2 per SDU).
+    pub fn bank_size(&self) -> i64 {
+        capacity::bank_size(&self.proto)
+    }
+
+    /// Set backpack capacity (snapped to the SDU grid: 12 + 3·n). Touches only
+    /// the inventory-sizes and black-market fields.
+    pub fn set_backpack_size(&mut self, slots: i64) -> Result<()> {
+        let new = capacity::set_backpack_size(&self.proto, slots)?;
+        proto::only_fields_changed(&self.proto, &new, &[13, 36])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Set bank capacity (snapped to the SDU grid: 6 + 2·n). Touches only the
+    /// bank-size and black-market fields.
+    pub fn set_bank_size(&mut self, slots: i64) -> Result<()> {
+        let new = capacity::set_bank_size(&self.proto, slots)?;
+        proto::only_fields_changed(&self.proto, &new, &[36, 56])?;
+        self.proto = new;
+        Ok(())
     }
 
     // ---------- edits (each guarded so only the intended field changes) ----------
@@ -979,5 +1008,21 @@ mod tests {
         assert_eq!(r.level(), Some(55));
         assert_eq!(r.money(), save.money(), "raw edit must not touch money");
         eprintln!("golden: raw fields {} groups; sync/raw ok", raw.len());
+
+        // Backpack/Bank capacity: set 39/24, snap to SDU grid, self-verify, and
+        // confirm only the capacity fields moved.
+        let mut cap = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        cap.set_backpack_size(39).expect("set backpack");
+        cap.set_bank_size(24).expect("set bank");
+        let _ = cap.to_bytes().expect("capacity edit must self-verify");
+        assert_eq!(cap.backpack_size(), Some(39), "backpack snaps to 39");
+        assert_eq!(cap.bank_size(), 24, "bank snaps to 24");
+        assert_eq!(cap.money(), save.money(), "capacity edit must not touch money");
+        assert_eq!(cap.items().unwrap().len(), save.items().unwrap().len(), "no items added");
+        eprintln!(
+            "golden: backpack {:?}->39, bank {}->24",
+            save.backpack_size(),
+            save.bank_size()
+        );
     }
 }

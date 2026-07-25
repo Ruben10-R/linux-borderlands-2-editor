@@ -72,6 +72,8 @@ struct Doc {
     playthroughs_completed: i64,
     active_playthrough: i64,
     op_level: i64,
+    backpack_size: i64,
+    bank_size: i64,
     money: i64,
     eridium: i64,
     seraph: i64,
@@ -199,6 +201,8 @@ impl App {
                     playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
                     active_playthrough: s.active_playthrough(),
                     op_level: s.op_level().unwrap_or(0),
+                    backpack_size: s.backpack_size().unwrap_or(12),
+                    bank_size: s.bank_size(),
                     level: s.level().unwrap_or(0),
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
@@ -291,6 +295,13 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     // OP level — only rewrite the virtual item if it actually changed.
     if doc.op_level != doc.save.op_level().unwrap_or(0) {
         doc.save.set_op_level(doc.op_level.clamp(0, 80))?;
+    }
+    // Backpack / bank capacity — only rewrite if changed.
+    if doc.backpack_size != doc.save.backpack_size().unwrap_or(12) {
+        doc.save.set_backpack_size(doc.backpack_size.clamp(12, 39))?;
+    }
+    if doc.bank_size != doc.save.bank_size() {
+        doc.save.set_bank_size(doc.bank_size.clamp(6, 200))?;
     }
     // Class + name are best-effort (a stray save might lack those fields).
     if !doc.class_def.is_empty() {
@@ -701,6 +712,22 @@ fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         });
         ui.end_row();
 
+        key(ui, "Backpack slots", accent);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.backpack_size, 3.0);
+            doc.backpack_size = doc.backpack_size.clamp(12, 39);
+            ui.weak("12–39 (snaps to +3 per SDU)");
+        });
+        ui.end_row();
+
+        key(ui, "Bank slots", accent);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.bank_size, 2.0);
+            doc.bank_size = doc.bank_size.clamp(6, 200);
+            ui.weak("snaps to +2 per SDU");
+        });
+        ui.end_row();
+
         if let Some(id) = doc.save.save_game_id() {
             field(ui, "Save ID", &id.to_string(), accent);
         }
@@ -1044,6 +1071,7 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
         "Character — name, class, head/skin, level, XP, skill points",
         "Currency — money, eridium, seraph crystals, torgue tokens",
         "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
+        "General — playthroughs, OP level, backpack/bank slots, save info",
         "Fast Travel — unlock stations (base game + DLC)",
     ] {
         ui.label(format!("   •  {s}"));

@@ -66,6 +66,7 @@ pub fn field_name(number: u64) -> &'static str {
         49 => "active_playthrough",
         53 => "items",
         54 => "weapons",
+        56 => "bank_size",
         _ => "",
     }
 }
@@ -108,6 +109,7 @@ pub fn field_help(number: u64) -> &'static str {
         49 => "Current playthrough you load into: 0 = Normal, 1 = TVHM, 2 = UVHM.",
         53 => "Non-weapon backpack items (shields, grenades, relics, class mods).",
         54 => "Weapons in your backpack.",
+        56 => "Bank slot count — edit via Bank slots in the General tab (kept in sync with the SDU).",
         _ => "",
     }
 }
@@ -210,6 +212,18 @@ pub(crate) fn emit_wire2_field(out: &mut Vec<u8>, number: u64, content: &[u8]) {
 pub(crate) fn emit_varint_field(out: &mut Vec<u8>, number: u64, value: u64) {
     encode_varint(out, number << 3);
     encode_varint(out, value);
+}
+
+/// Decode one varint at `pos`, returning (value, bytes consumed).
+pub(crate) fn decode_varint_at(buf: &[u8], pos: usize) -> Option<(u64, usize)> {
+    let mut p = pos;
+    let v = read_varint(buf, &mut p).ok()?;
+    Some((v, p - pos))
+}
+
+/// Append a bare varint (no tag) to `out`.
+pub(crate) fn push_varint(out: &mut Vec<u8>, v: u64) {
+    encode_varint(out, v);
 }
 
 /// Replace every occurrence of the repeated string field `number` with `values`,

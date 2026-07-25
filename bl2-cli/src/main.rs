@@ -115,6 +115,20 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set backpack slot count (12–39, snaps to +3 per SDU).
+    SetBackpack {
+        sav: PathBuf,
+        slots: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Set bank slot count (snaps to +2 per SDU).
+    SetBank {
+        sav: PathBuf,
+        slots: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set specialist skill points.
     SetSpecialistPoints {
         sav: PathBuf,
@@ -226,6 +240,20 @@ fn run() -> Result<(), SaveError> {
             "current playthrough",
             |s| s.active_playthrough(),
             |s| s.set_active_playthrough(index.clamp(0, 2)),
+        ),
+        Cmd::SetBackpack { sav, slots, w } => edit(
+            &sav,
+            w,
+            "backpack slots",
+            |s| s.backpack_size().unwrap_or(12),
+            |s| s.set_backpack_size(slots),
+        ),
+        Cmd::SetBank { sav, slots, w } => edit(
+            &sav,
+            w,
+            "bank slots",
+            |s| s.bank_size(),
+            |s| s.set_bank_size(slots),
         ),
         Cmd::SetSpecialistPoints { sav, points, w } => edit(
             &sav,
