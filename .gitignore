@@ -18,3 +18,6 @@ poc-roundtrip/roundtrip-out.sav
 
 # Real save copies — keep personal saves (and Steam ID) out of the public repo
 samples/*.sav
+
+# Gibbed UI reference screenshots (copyrighted — local reference only)
+gibbed editor pictures/
