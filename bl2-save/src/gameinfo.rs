@@ -1,11 +1,11 @@
-//! Resolve item-serial database refs to human names.
+//! Resolve item-serial database refs to display names.
 //!
 //! An item serial stores `(sublibrary, asset)` indices into Gibbed's GameInfo
-//! "asset library". We embed a compact slice of that database — manufacturers +
-//! weapon/item types across all sets — extracted from the zlib-licensed
-//! Gibbed.Borderlands2.GameInfo. These are factual identifier strings (not art)
-//! used for interoperability. Balance/part names are a larger future slice
-//! (§15). Lookup: `sets[set].libraries[category].sublibraries[lib].assets[asset]`.
+//! "asset library". We embed a compact slice of that database — manufacturers,
+//! weapon/item types, balance definitions and parts across all sets —
+//! extracted from the zlib-licensed Gibbed.Borderlands2.GameInfo. These are
+//! factual identifier strings (not art) used for interoperability.
+//! Lookup: `sets[set].libraries[category].sublibraries[lib].assets[asset]`.
 
 use std::sync::OnceLock;
 
@@ -68,8 +68,8 @@ pub(crate) fn name_part_word(category: &str, set: u32, lib: u32, asset: u32) -> 
     nameparts().get(&path)?.as_str().map(str::to_string)
 }
 
-/// A short, human-friendly name for a ref (e.g. "Jakobs", "Jakobs Pistol"),
-/// or None if the ref isn't in our embedded slice.
+/// A short display name for a ref (e.g. "Jakobs", "Jakobs Pistol"), or None if
+/// the ref isn't in our embedded slice.
 pub(crate) fn name(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> {
     let path = asset_path(category, set, lib, asset)?;
     let seg = path.rsplit('.').next().unwrap_or(&path);

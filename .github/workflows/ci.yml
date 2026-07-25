@@ -44,5 +44,11 @@ jobs:
       - name: Tests
         run: cargo test --workspace --exclude bl2-gui
 
+      # bl2-gui is excluded above (its tests can't run in a plain rust:1 image
+      # locally), but the runner has the GL/GTK libs, so run its unit tests here
+      # — otherwise the save-folder detection tests never execute anywhere.
+      - name: Tests (GUI unit tests)
+        run: cargo test -p bl2-gui --lib
+
       - name: Build (web / WASM)
         run: cargo build -p bl2-gui --target wasm32-unknown-unknown

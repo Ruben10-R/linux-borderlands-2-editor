@@ -285,7 +285,7 @@ pub(super) fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color3
     );
 }
 
-/// Currency tab: money, eridium (seraph/torgue coming next slice).
+/// Currency tab: money, eridium, seraph crystals and torgue tokens.
 pub(super) fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     egui::Grid::new("currency")
         .num_columns(2)
@@ -516,7 +516,6 @@ pub(super) fn items_tab(
             .min_col_width(56.0)
             .striped(true)
             .show(ui, |ui| {
-                // Column headers.
                 for h in ["Kind", "Level", "Name", "", ""] {
                     ui.label(egui::RichText::new(h).color(accent).strong().size(13.0));
                 }
@@ -803,11 +802,10 @@ pub(super) fn rebuild_items_preserving_levels(doc: &mut Doc) {
     }
 }
 
-/// Render the open item's slot list. Each "change" opens the picker modal
-/// (rendered separately) for that slot. The actual swap happens in the modal.
-/// The item detail form: header (type/balance/manufacturer/level) plus a list of
-/// this item's part slots, each with its human name (see [`bl2_save::slot_label`])
-/// and a "change" button that opens the picker modal.
+/// The item detail form: a read-only header (type/balance/manufacturer/level)
+/// plus this item's part slots, each named via [`bl2_save::slot_label`] with a
+/// "change" button. The button only opens the picker modal — the swap itself
+/// happens there.
 pub(super) fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     let Some(id) = doc.editing_parts else { return };
     let Some(idx) = doc.items.iter().position(|v| v.id == id) else {

@@ -2,7 +2,7 @@
 //!
 //! Extracted from the zlib-licensed Gibbed.Borderlands2.GameInfo
 //! (`FastTravelStationDefinition` entries): the `resource_name` stored in the
-//! save's field 16 mapped to a human `station_display_name`, grouped by DLC pack.
+//! save's field 16 mapped to its `station_display_name`, grouped by DLC pack.
 //! Factual identifier data, not art — see ASSETS.md.
 
 use std::sync::OnceLock;

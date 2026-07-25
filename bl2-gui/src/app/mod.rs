@@ -951,7 +951,6 @@ impl eframe::App for App {
                         });
                     });
 
-                    // Theme switcher.
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Theme:");
@@ -1123,7 +1122,6 @@ impl eframe::App for App {
                     ui.separator();
                     ui.add_space(6.0);
 
-                    // Tab content.
                     let tab = self.tab;
                     let doc = self.doc.as_mut().unwrap();
                     let tab_status = match tab {
@@ -1172,7 +1170,6 @@ impl eframe::App for App {
         // Parts picker modal — floats with full space; search keeps focus.
         self.parts_picker_modal(&ctx);
 
-        // Code library browser modal.
         self.library_modal(&ctx);
 
         // "How to install" modal — rendered above everything else.
@@ -1314,7 +1311,6 @@ impl App {
                 ui.label(egui::RichText::new("Item code library").color(accent).size(18.0).strong());
                 ui.weak(format!("{} codes", lib.len()));
             });
-            // Category filter.
             ui.horizontal_wrapped(|ui| {
                 if ui.selectable_label(doc.lib_category == 0, "All").clicked() {
                     doc.lib_category = 0;

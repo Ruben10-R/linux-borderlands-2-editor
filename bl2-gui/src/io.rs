@@ -1,4 +1,4 @@
-//! Platform save output. Native writes to disk (handled in `app.rs` via
+//! Platform save output. Native writes to disk (handled in `app/mod.rs` via
 //! `SaveFile::save`); the web build can't write to disk, so it downloads the
 //! edited bytes as a file. This module holds the web download.
 

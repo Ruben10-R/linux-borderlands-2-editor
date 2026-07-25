@@ -2,7 +2,7 @@
 name = "bl2-gui"
 version = "0.1.0"
 edition = "2021"
-description = "Read-only Borderlands 2 save viewer (egui/eframe) — builds native and web/WASM."
+description = "Borderlands 2 save editor UI (egui/eframe) — builds native and web/WASM."
 
 [dependencies]
 bl2-save = { workspace = true }

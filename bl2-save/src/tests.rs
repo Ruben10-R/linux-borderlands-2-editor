@@ -115,6 +115,303 @@ fn import_group_copies_fields() {
     assert!(fresh.to_bytes().is_ok(), "still a valid save after import");
 }
 
+/// Each import group must carry exactly its own field numbers across, leaving
+/// the destination's other fields alone. (`Skills` is covered above.)
+#[test]
+fn import_group_carries_each_groups_fields() {
+    // (group, a field number it owns, a marker payload)
+    let cases = [
+        (ImportGroup::Missions, 18u64),
+        (ImportGroup::World, 16),
+        (ImportGroup::Stats, 15),
+    ];
+    for (group, number) in cases {
+        let mut source = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Src");
+        crate::proto::emit_wire2_field(&mut source.proto, number, b"carried");
+        source.set_money(4242).unwrap();
+
+        let mut dest = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Dst");
+        dest.set_money(7).unwrap();
+        dest.import_group(&source, group).unwrap();
+
+        let fields = crate::proto::parse_fields(&dest.proto).unwrap();
+        let carried: Vec<&[u8]> = fields
+            .iter()
+            .filter(|f| f.number == number && f.wire_type == 2)
+            .map(|f| crate::proto::wire2_content(&dest.proto, f).unwrap())
+            .collect();
+        assert!(
+            carried.contains(&&b"carried"[..]),
+            "{} must carry field {number}",
+            group.label()
+        );
+        assert_eq!(dest.money(), 7, "{} must not carry currency", group.label());
+        assert_eq!(
+            dest.name().as_deref(),
+            Some("Dst"),
+            "{} must not carry the name",
+            group.label()
+        );
+        assert!(dest.to_bytes().is_ok(), "still a valid save after import");
+    }
+}
+
+/// The Raw inspector's string editor: rewrites one field, touches nothing else.
+#[test]
+fn set_raw_string_edits_only_that_field() {
+    let mut s = SaveFile {
+        proto: synthetic_proto(),
+    };
+    s.set_raw_string(1, "GD_Siren.Character.CharClass_Siren")
+        .unwrap();
+    assert_eq!(s.class_name().as_deref(), Some("Maya (Siren)"));
+    assert_eq!(s.level(), Some(4), "level untouched");
+    assert_eq!(s.money(), 608, "money untouched");
+    // The opaque unknown field (9) survives byte-for-byte.
+    let fields = s.fields().unwrap();
+    let f9 = fields.iter().find(|f| f.number == 9).expect("field 9");
+    assert_eq!(&s.proto[f9.val_start + 1..f9.end], &[0xDE, 0xAD, 0xBE]);
+    // An absent field is an error, not a silent append.
+    assert!(s.set_raw_string(99, "x").is_err());
+}
+
+/// Bulk code import reports how many landed and how many were rejected.
+#[test]
+fn add_items_from_codes_counts_successes_and_failures() {
+    let lib = code_library();
+    let (a, b) = (&lib[0].code, &lib[1].code);
+    let mut s = SaveFile::new_character("GD_Assassin.Character.CharClass_Assassin", "Zero");
+    assert_eq!(s.items().unwrap().len(), 0, "fresh character has no items");
+
+    // Two good codes, one with invalid base64, one that isn't a code at all.
+    let text = format!("{a} , BL2(!!!!) | {b}\nnot a code here");
+    let (ok, failed) = s.add_items_from_codes(&text, false);
+    assert_eq!((ok, failed), (2, 1), "two imported, one rejected");
+    assert_eq!(s.items().unwrap().len(), 2);
+    assert!(s.to_bytes().is_ok(), "import self-verifies");
+
+    // Bank routing puts them in the other bag.
+    let mut s2 = SaveFile::new_character("GD_Assassin.Character.CharClass_Assassin", "Zero");
+    assert_eq!(s2.add_items_from_codes(a, true), (1, 0));
+    assert_eq!(s2.items().unwrap()[0].location, Location::Bank);
+
+    // Nothing recognisable → no work, no error.
+    assert_eq!(s2.add_items_from_codes("nothing here", false), (0, 0));
+}
+
+/// `describe_code` classifies each category. The library's own `category` field
+/// was produced by this same function, so this pins the behaviour rather than
+/// proving it independently — the value is catching a regression in the
+/// non-weapon branches, which nothing else exercises.
+#[test]
+fn describe_code_classifies_every_category() {
+    for category in library_categories() {
+        let entry = code_library()
+            .iter()
+            .find(|e| e.category == category)
+            .unwrap_or_else(|| panic!("library has a {category} entry"));
+        let info = describe_code(&entry.code)
+            .unwrap_or_else(|| panic!("{category} code decodes: {}", entry.code));
+        assert_eq!(info.category, category, "code {}", entry.code);
+        assert!(!info.family.is_empty(), "{category} has a family");
+    }
+    assert!(describe_code("not a code").is_none());
+    assert!(describe_code("BL2(!!!!)").is_none());
+}
+
+/// `SaveFile::load`/`save` on disk, including the `.bak` behaviour.
+#[test]
+fn save_and_load_on_disk_with_backup() {
+    let dir = std::env::temp_dir().join(format!("bl2save_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("save0001.sav");
+
+    let mut s = SaveFile::new_character("GD_Soldier.Character.CharClass_Soldier", "Axton");
+    s.set_money(1111).unwrap();
+    // Nothing to back up yet, so no .bak appears.
+    s.save(&path, true).expect("write new save");
+    assert!(!dir.join("save0001.sav.bak").exists(), "nothing to back up");
+
+    let mut reloaded = SaveFile::load(&path).expect("load from disk");
+    assert_eq!(reloaded.money(), 1111);
+    assert_eq!(reloaded.name().as_deref(), Some("Axton"));
+
+    reloaded.set_money(2222).unwrap();
+    reloaded.save(&path, true).expect("overwrite with backup");
+    let bak = dir.join("save0001.sav.bak");
+    assert!(bak.exists(), "backup written on overwrite");
+    assert_eq!(
+        SaveFile::load(&bak).unwrap().money(),
+        1111,
+        "backup holds the pre-edit value"
+    );
+    assert_eq!(
+        SaveFile::load(&path).unwrap().money(),
+        2222,
+        "target edited"
+    );
+
+    // backup = false overwrites without refreshing the .bak.
+    let mut third = SaveFile::load(&path).unwrap();
+    third.set_money(3333).unwrap();
+    third.save(&path, false).unwrap();
+    assert_eq!(
+        SaveFile::load(&bak).unwrap().money(),
+        1111,
+        "stale .bak kept"
+    );
+    assert_eq!(SaveFile::load(&path).unwrap().money(), 3333);
+
+    assert!(
+        SaveFile::load(dir.join("nope.sav")).is_err(),
+        "missing file errors"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Loading a file that is neither a save nor a profile fails cleanly — the
+/// path the GUI takes when someone drops the wrong file on the window.
+#[test]
+fn loading_junk_reports_an_error() {
+    let junk: Vec<u8> = (0..512u32).map(|i| (i % 251) as u8).collect();
+    assert!(SaveFile::from_bytes(&junk).is_err());
+    assert!(ProfileFile::from_bytes(&junk).is_err());
+    // A save is not a profile and vice versa.
+    let save = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Maya")
+        .to_bytes()
+        .unwrap();
+    assert!(ProfileFile::from_bytes(&save).is_err());
+}
+
+/// Re-leveling without a real save: build an inventory from library codes,
+/// then level it. Also covers per-item leveling and the `force` flag.
+#[test]
+fn relevel_items_on_a_synthetic_inventory() {
+    let lib = code_library();
+    let mut s = SaveFile::new_character("GD_Mercenary.Character.CharClass_Mercenary", "Sal");
+    let codes: Vec<&str> = lib.iter().take(5).map(|e| e.code.as_str()).collect();
+    for code in &codes {
+        s.add_item_from_code(code, false).unwrap();
+    }
+    s.set_money(999).unwrap();
+    let before = s.items().unwrap();
+    assert_eq!(before.len(), 5);
+
+    let levelable = before.iter().filter(|it| it.serial.is_levelable()).count();
+    let changed = s.set_all_item_levels(31, false).unwrap();
+    assert_eq!(changed, levelable, "only levelable items are touched");
+    for it in s.items().unwrap() {
+        if it.serial.is_levelable() {
+            assert_eq!(it.serial.stage, Some(31));
+            assert_eq!(it.serial.grade, Some(31), "grade tracks the stage");
+        }
+    }
+    assert_eq!(s.money(), 999, "re-leveling must not touch currency");
+    assert!(s.to_bytes().is_ok(), "still a valid save");
+
+    // Per-item: an id that doesn't exist is simply "no change", not an error.
+    assert!(!s.set_item_level(9999, 20).unwrap());
+    let id = s
+        .items()
+        .unwrap()
+        .iter()
+        .find(|it| it.serial.is_levelable())
+        .map(|it| it.id)
+        .expect("at least one levelable item");
+    assert!(s.set_item_level(id, 7).unwrap());
+    let after = s.items().unwrap();
+    assert_eq!(
+        after.iter().find(|it| it.id == id).unwrap().serial.stage,
+        Some(7)
+    );
+
+    // Levels are clamped to the 7-bit packed field rather than corrupting it.
+    s.set_all_item_levels(9999, true).unwrap();
+    for it in s.items().unwrap() {
+        if let Some(stage) = it.serial.stage {
+            assert!(stage <= 127, "stage stays inside its 7-bit field");
+        }
+    }
+    assert!(s.to_bytes().is_ok(), "clamped levels still self-verify");
+}
+
+/// Part swapping refuses values too wide for the packed slot instead of
+/// silently corrupting the neighbouring fields.
+#[test]
+fn set_item_part_validates_ranges() {
+    let mut s = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Maya");
+    s.add_item_from_code(&code_library()[0].code, false)
+        .unwrap();
+    let it = s.items().unwrap().into_iter().next().unwrap();
+    let slot = it
+        .serial
+        .parts
+        .iter()
+        .position(|p| p.is_some())
+        .expect("item has a part");
+
+    let cat = parts_catalog(it.serial.is_weapon, it.serial.set);
+    let choice = &cat[0];
+    assert!(s
+        .set_item_part(it.id, slot, choice.lib, choice.asset)
+        .unwrap());
+    assert!(s.to_bytes().is_ok());
+
+    assert!(
+        s.set_item_part(it.id, slot, u32::MAX, u32::MAX).is_err(),
+        "out-of-range part refused"
+    );
+    assert!(
+        !s.set_item_part(it.id, 99, choice.lib, choice.asset)
+            .unwrap(),
+        "out-of-range slot is 'no change'"
+    );
+}
+
+/// Deterministic fuzz sweep: no byte string may crash the loaders.
+///
+/// This is the regression net for the whole "corrupt file panics instead of
+/// erroring" class — including a panic that lived in the LZO decompressor
+/// rather than in our own code.
+#[test]
+fn arbitrary_bytes_never_crash_the_loaders() {
+    // xorshift64* — a fixed seed keeps failures reproducible.
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    };
+
+    let valid = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Maya")
+        .to_bytes()
+        .unwrap();
+
+    for case in 0..600 {
+        let mut bytes = match case % 3 {
+            // Pure noise of a random length.
+            0 => (0..(next() as usize % 600) + 1)
+                .map(|_| next() as u8)
+                .collect::<Vec<u8>>(),
+            // A real save with bytes corrupted — keeps the container plausible
+            // so the mutation reaches the deeper parsing stages.
+            1 => valid.clone(),
+            // A real save truncated at a random point.
+            _ => valid[..next() as usize % valid.len()].to_vec(),
+        };
+        if case % 3 == 1 {
+            for _ in 0..(next() as usize % 8) + 1 {
+                let i = next() as usize % bytes.len();
+                bytes[i] ^= next() as u8;
+            }
+        }
+        // The only requirement: return, don't panic or hang.
+        let _ = SaveFile::from_bytes(&bytes);
+        let _ = ProfileFile::from_bytes(&bytes);
+    }
+}
+
 /// Build a tiny synthetic top-level protobuf: class(1,str), level(2), xp(3),
 /// packed currency(6)=[money, eridium, 0], plus an "unknown" field(9) we must
 /// never disturb.

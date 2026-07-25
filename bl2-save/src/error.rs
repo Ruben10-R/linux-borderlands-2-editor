@@ -28,6 +28,10 @@ pub enum SaveError {
     #[error("LZO: {0}")]
     Lzo(String),
 
+    /// The Huffman payload is malformed (truncated, or an impossible tree).
+    #[error("corrupt Huffman payload: {0}")]
+    Huffman(String),
+
     #[error("protobuf: {0}")]
     Proto(String),
 

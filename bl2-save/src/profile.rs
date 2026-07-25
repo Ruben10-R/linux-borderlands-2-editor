@@ -75,7 +75,9 @@ fn parse_entries(data: &[u8]) -> Result<Vec<Entry>> {
     }
     let n = be32(&data[0..4]) as usize;
     let mut pos = 4usize;
-    let mut entries = Vec::with_capacity(n);
+    // `n` comes straight out of the file, so don't pre-allocate from it; the
+    // per-entry bounds checks below stop a bogus count from running long.
+    let mut entries = Vec::with_capacity(n.min(1024));
     for _ in 0..n {
         let need = |p: usize, k: usize| -> Result<()> {
             if p + k > data.len() {
@@ -132,8 +134,7 @@ fn decompress(raw: &[u8]) -> Result<Vec<u8>> {
         return Err(SaveError::TooShort(raw.len()));
     }
     let uncompressed_size = be32(&raw[20..24]) as usize;
-    let inner = lzokay_native::decompress_all(&raw[24..], Some(uncompressed_size))
-        .map_err(|e| SaveError::Lzo(format!("profile decompress: {e}")))?;
+    let inner = crate::codec::lzo_decompress(&raw[24..], uncompressed_size, "profile decompress")?;
     if inner.len() != uncompressed_size {
         return Err(SaveError::Size(format!(
             "profile LZO output {} != declared {}",
@@ -228,8 +229,7 @@ impl ProfileFile {
         Ok(())
     }
 
-    /// Displayed Badass Rank = (entry 136 + entry 137) / 10. Read-only for now
-    /// (setting it needs token math — slice 2).
+    /// Displayed Badass Rank = (entry 136 + entry 137) / 10.
     pub fn badass_rank(&self) -> Option<i32> {
         match (self.int32(ID_BADASS_RANK1), self.int32(ID_BADASS_RANK2)) {
             (None, None) => None,
@@ -429,6 +429,102 @@ mod tests {
         let re = ProfileFile::from_bytes(&out).unwrap();
         assert_eq!(re.golden_keys(), Some(200), "golden keys persisted");
         assert_eq!(re.badass_rank(), Some(30), "badass untouched");
+    }
+
+    // ---- malformed input: must return Err, never panic or over-allocate ----
+
+    #[test]
+    fn rejects_short_and_truncated_containers() {
+        assert!(matches!(
+            ProfileFile::from_bytes(&[]),
+            Err(SaveError::TooShort(0))
+        ));
+        assert!(ProfileFile::from_bytes(&[0u8; 40]).is_err());
+        // Truncating a valid profile at every length must never panic.
+        let good = compress(&serialize_entries(&synthetic())).unwrap();
+        for len in 0..good.len() {
+            let _ = ProfileFile::from_bytes(&good[..len]);
+        }
+    }
+
+    #[test]
+    fn rejects_absurd_entry_count() {
+        // Claims 4 billion entries but carries none — must not try to allocate
+        // for them, and must fail on the first missing entry.
+        let mut data = u32::MAX.to_be_bytes().to_vec();
+        data.extend_from_slice(&[1, 0, 0, 0, 2, DT_INT32, 0, 0, 0, 5, 0]);
+        assert!(matches!(parse_entries(&data), Err(SaveError::Proto(_))));
+    }
+
+    #[test]
+    fn rejects_bad_type_and_truncated_value() {
+        // Unknown data type.
+        let mut data = 1u32.to_be_bytes().to_vec();
+        data.extend_from_slice(&[1, 0, 0, 0, 2, 99, 0]);
+        assert!(matches!(parse_entries(&data), Err(SaveError::Proto(_))));
+
+        // Binary entry whose declared length runs past the buffer.
+        let mut data = 1u32.to_be_bytes().to_vec();
+        data.extend_from_slice(&[1, 0, 0, 0, 2, DT_BINARY]);
+        data.extend_from_slice(&9999u32.to_be_bytes());
+        data.extend_from_slice(&[1, 2, 3]);
+        assert!(matches!(parse_entries(&data), Err(SaveError::Proto(_))));
+
+        // Int32 entry cut off mid-value.
+        let mut data = 1u32.to_be_bytes().to_vec();
+        data.extend_from_slice(&[1, 0, 0, 0, 2, DT_INT32, 0, 0]);
+        assert!(matches!(parse_entries(&data), Err(SaveError::Proto(_))));
+    }
+
+    #[test]
+    fn edits_on_a_profile_missing_the_entry_error_cleanly() {
+        // A profile with only an unrelated int32: every setter must report a
+        // missing entry rather than silently doing nothing.
+        let bare = vec![Entry {
+            start_byte: 1,
+            id: 2,
+            data_type: DT_INT32,
+            value: vec![0, 0, 0, 5],
+            end_byte: 0,
+        }];
+        let bytes = compress(&serialize_entries(&bare)).unwrap();
+        let mut p = ProfileFile::from_bytes(&bytes).unwrap();
+        assert!(p.golden_keys().is_none());
+        assert!(p.badass_rank().is_none());
+        assert!(p.customization_stats().is_none());
+        assert!(p.set_golden_keys(10).is_err());
+        assert!(p.set_all_customizations(true).is_err());
+        assert!(p.set_badass_rank(100).is_err());
+    }
+
+    /// `load` reads from disk and `save` writes a `.bak` before overwriting.
+    #[test]
+    fn load_and_save_roundtrip_on_disk_with_backup() {
+        let dir = std::env::temp_dir().join(format!("bl2prof_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("profile.bin");
+
+        let bytes = compress(&serialize_entries(&synthetic())).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+
+        let mut p = ProfileFile::load(&path).expect("load from disk");
+        assert_eq!(p.golden_keys(), Some(3));
+        p.set_golden_keys(123).unwrap();
+        p.save(&path, true).expect("save with backup");
+
+        let bak = dir.join("profile.bin.bak");
+        assert!(bak.exists(), "backup written");
+        assert_eq!(
+            ProfileFile::load(&bak).unwrap().golden_keys(),
+            Some(3),
+            "backup holds the pre-edit value"
+        );
+        assert_eq!(
+            ProfileFile::load(&path).unwrap().golden_keys(),
+            Some(123),
+            "target holds the edit"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // Byte-exact round-trip of a real profile.bin, if one is present.

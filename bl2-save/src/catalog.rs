@@ -106,7 +106,7 @@ pub const CLASSES: [(&str, &str); 6] = [
 #[derive(Clone, Debug)]
 pub struct RawField {
     pub number: u64,
-    /// Human field name (from the save schema), or "" if unknown.
+    /// Field name from the save schema, or "" if unknown.
     pub name: &'static str,
     /// Plain-language explanation of the field, or "" if undocumented.
     pub help: &'static str,
@@ -118,7 +118,8 @@ pub struct RawField {
     pub value: Option<i64>,
     /// Editable value for a single-occurrence UTF-8 string field.
     pub text: Option<String>,
-    /// Human summary (value, quoted string, "(message, N bytes)", "N entries").
+    /// Summary shown in the inspector: value, quoted string,
+    /// "(message, N bytes)", or "N entries".
     pub preview: String,
 }
 
@@ -167,7 +168,7 @@ pub fn default_customization(class_def: &str, is_head: bool) -> Option<String> {
     crate::customizations::default_path(class_def, is_head)
 }
 
-/// Human name for part slot `slot` of a weapon or item.
+/// Name of part slot `slot` on a weapon or item.
 ///
 /// Weapons have a fixed 11-slot layout, so every slot gets its real name.
 /// Items are heterogeneous (a shield, grenade mod and relic use slots 0–7 for

@@ -1,5 +1,8 @@
 // Borderlands 2 save tool — proof-of-concept CLI.
 //
+// Superseded by the `bl2-save` crate and the `bl2edit` CLI; kept only as the
+// original standalone proof that the codec round-trips. Don't build on it.
+//
 // Subcommands:
 //   roundtrip [sav]                     decode + re-encode, prove it's byte-correct
 //   dump      [sav]                     list the protobuf's top-level fields

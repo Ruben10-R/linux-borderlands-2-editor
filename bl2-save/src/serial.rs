@@ -5,9 +5,9 @@
 //! an XOR keystream + a byte rotation over a 2-byte BogoCRC followed by a
 //! little-endian bit-packed list of database references (type/balance/…/parts).
 //!
-//! The references are indices into the GameInfo database (mapping them to human
-//! names is a separate, larger task — see PLAN.md §8/§15). This module gives the
-//! structured numbers and round-trips them byte-for-byte.
+//! The references are indices into the GameInfo database; [`crate::gameinfo`]
+//! resolves them to names. This module gives the structured numbers and
+//! round-trips them byte-for-byte.
 
 use crate::error::{Result, SaveError};
 
@@ -150,7 +150,6 @@ fn rotate_right(data: &[u8], steps: usize) -> Vec<u8> {
     out
 }
 
-#[allow(dead_code)] // write side: exercised by tests now; drives item editing (M7)
 fn rotate_left(data: &[u8], steps: usize) -> Vec<u8> {
     if data.is_empty() {
         return Vec::new();
@@ -195,7 +194,6 @@ fn unpack_values(is_weapon: bool, data: &[u8]) -> Vec<Option<u64>> {
     result
 }
 
-#[allow(dead_code)] // write side: exercised by tests now; drives item editing (M7)
 fn pack_values(is_weapon: bool, values: &[Option<u64>]) -> Vec<u8> {
     let mut i = 0usize;
     let mut item = vec![0u8; 48]; // generous; truncated below (reference uses 32)
@@ -218,7 +216,6 @@ fn pack_values(is_weapon: bool, values: &[Option<u64>]) -> Vec<u8> {
     item
 }
 
-#[allow(dead_code)] // write side: exercised by tests now; drives item editing (M7)
 fn create_body(item: &[u8], header: &[u8], key: i32) -> Vec<u8> {
     let mut crc_input = Vec::with_capacity(header.len() + 2 + 33);
     crc_input.extend_from_slice(header);
@@ -259,7 +256,6 @@ fn unwrap_raw(data: &[u8]) -> Result<(bool, Vec<Option<u64>>, i32)> {
     Ok((is_weapon, unpack_values(is_weapon, &raw[2..]), key))
 }
 
-#[allow(dead_code)] // write side: exercised by tests now; drives item editing (M7)
 fn wrap_raw(is_weapon: bool, values: &[Option<u64>], key: i32) -> Vec<u8> {
     let item = pack_values(is_weapon, values);
     let mut header = Vec::with_capacity(5);
@@ -309,8 +305,18 @@ pub(crate) fn with_part(serial: &[u8], slot: usize, part: PartRef) -> Result<Opt
     if idx >= values.len() || values[idx].is_none() {
         return Ok(None);
     }
-    let bits = 10 + is_weapon as u32; // WeaponParts asset_bits=11, ItemParts=10
-    values[idx] = Some(((part.lib as u64) << bits) | (part.asset as u64));
+    let asset_bits = 10 + is_weapon as u32; // WeaponParts asset_bits=11, ItemParts=10
+                                            // A part slot is a fixed-width packed field. An out-of-range lib/asset
+                                            // would silently overflow into the neighbouring fields (and be truncated),
+                                            // producing a corrupt item, so reject it instead.
+    let lib_bits = SIZES[is_weapon as usize][idx] - asset_bits;
+    if part.asset >> asset_bits != 0 || part.lib >> lib_bits != 0 {
+        return Err(SaveError::Proto(format!(
+            "part {}:{} does not fit slot {slot} ({lib_bits}-bit lib, {asset_bits}-bit asset)",
+            part.lib, part.asset
+        )));
+    }
+    values[idx] = Some(((part.lib as u64) << asset_bits) | (part.asset as u64));
     Ok(Some(wrap_raw(is_weapon, &values, key)))
 }
 
@@ -506,6 +512,69 @@ mod tests {
             // Re-wrap the decoded values → identical bytes (proves both directions).
             let serial2 = wrap_raw(w2, &v2, k2);
             assert_eq!(serial, serial2, "serial must round-trip byte-for-byte");
+        }
+    }
+
+    #[test]
+    fn with_part_rejects_values_too_wide_for_the_slot() {
+        let mut values: Vec<Option<u64>> = vec![Some(0); 8];
+        values.extend(std::iter::repeat_n(None, 9));
+        for is_weapon in [false, true] {
+            let serial = wrap_raw(is_weapon, &values, 7);
+            let asset_bits = 10 + is_weapon as u32;
+            let max_asset = (1u32 << asset_bits) - 1;
+
+            // In range (slot 0 = values[6], which is present) → applied.
+            let ok = with_part(
+                &serial,
+                0,
+                PartRef {
+                    lib: 63,
+                    asset: max_asset,
+                },
+            )
+            .expect("in-range part accepted");
+            assert!(ok.is_some());
+
+            // Asset one bit too wide, and lib beyond its 6 bits → refused.
+            assert!(with_part(
+                &serial,
+                0,
+                PartRef {
+                    lib: 0,
+                    asset: max_asset + 1
+                }
+            )
+            .is_err());
+            assert!(with_part(&serial, 0, PartRef { lib: 64, asset: 0 }).is_err());
+            assert!(with_part(
+                &serial,
+                0,
+                PartRef {
+                    lib: u32::MAX,
+                    asset: u32::MAX
+                }
+            )
+            .is_err());
+
+            // An empty slot is still "no change", not an error.
+            assert!(with_part(&serial, 8, PartRef { lib: 1, asset: 1 })
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn malformed_serials_error_rather_than_panic() {
+        assert!(unwrap(&[]).is_err(), "empty");
+        assert!(unwrap(&[7, 0, 0, 0]).is_err(), "shorter than the header");
+        assert!(unwrap(&[3, 0, 0, 0, 0, 1, 2]).is_err(), "wrong version");
+        // Valid header + version, but a body too short to hold the BogoCRC.
+        assert!(unwrap(&[7, 0, 0, 0, 0, 9]).is_err(), "body too short");
+        // Every truncation of a real serial must return, not panic.
+        let full = wrap_raw(true, &vec![Some(1); 17], 1234);
+        for len in 0..full.len() {
+            let _ = unwrap(&full[..len]);
         }
     }
 

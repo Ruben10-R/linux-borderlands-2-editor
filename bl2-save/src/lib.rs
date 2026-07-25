@@ -194,7 +194,7 @@ impl SaveFile {
         Ok(())
     }
 
-    /// Human-readable character/class name (e.g. "Zer0 (Assassin)").
+    /// The character's class as the game shows it (e.g. "Zer0 (Assassin)").
     pub fn class_name(&self) -> Option<String> {
         let fields = self.fields().ok()?;
         let def = proto::read_string_field(&self.proto, &fields, proto::FIELD_CLASS)?;

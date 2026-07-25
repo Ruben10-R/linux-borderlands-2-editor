@@ -1,7 +1,7 @@
-//! `bl2-gui` — read-only Borderlands 2 save viewer built on egui/eframe.
+//! `bl2-gui` — Borderlands 2 save editor UI, built on egui/eframe.
 //!
-//! One `App` powers both the native window (`src/main.rs`) and the web/WASM build
-//! (served by `docker compose up`). It is a thin, read-only view over `bl2-save`.
+//! One `App` powers both the native window (`src/main.rs`) and the web/WASM
+//! build (served by `docker compose up`), editing through the `bl2-save` core.
 
 mod app;
 mod io;

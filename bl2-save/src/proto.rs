@@ -10,7 +10,7 @@
 
 use crate::error::{Result, SaveError};
 
-// --- verified top-level field numbers (see PLAN.md; confirmed vs a real save) ---
+// --- verified top-level field numbers (confirmed against a real save) ---
 pub const FIELD_CLASS: u64 = 1; // PlayerClassDefinition path (string)
 pub const FIELD_LEVEL: u64 = 2; // experience level (varint)
 pub const FIELD_XP: u64 = 3; // experience points (varint)
@@ -28,8 +28,7 @@ pub const IDX_ERIDIUM: usize = 1;
 pub const IDX_SERAPH: usize = 2;
 pub const IDX_TORGUE: usize = 4;
 
-/// Human name for a top-level save field number (from apocalyptech's save
-/// structure), for the Raw inspector. "" if unknown.
+/// Name of a top-level save field, for the Raw inspector. "" if unknown.
 pub fn field_name(number: u64) -> &'static str {
     // Complete map from Gibbed's WillowTwoPlayerSaveGame proto (field numbers +
     // names are facts; readable snake_case is ours).
@@ -636,6 +635,43 @@ mod tests {
             only_fields_changed(&a, &b, &[2]).is_err(),
             "field 3 changed but not allowed"
         );
+    }
+
+    #[test]
+    fn parse_fields_rejects_malformed_messages() {
+        // Length-delimited field claiming more bytes than remain.
+        assert!(parse_fields(&[(1 << 3) | 2, 200, 1, 2, 3]).is_err());
+        // Varint with the continuation bit set but no following byte.
+        assert!(parse_fields(&[1 << 3, 0x80]).is_err());
+        // Tag varint itself truncated.
+        assert!(parse_fields(&[0x80]).is_err());
+        // Wire types we don't model (3/4 = deprecated groups, 6/7 = invalid).
+        for wt in [3u8, 4, 6, 7] {
+            assert!(
+                parse_fields(&[(1 << 3) | wt, 0]).is_err(),
+                "wire type {wt} must be refused"
+            );
+        }
+        // fixed64 / fixed32 running past the end.
+        assert!(parse_fields(&[(1 << 3) | 1, 0, 0]).is_err());
+        assert!(parse_fields(&[(1 << 3) | 5, 0]).is_err());
+    }
+
+    /// Truncating a well-formed message at any point must return, not panic.
+    #[test]
+    fn truncated_messages_never_panic() {
+        let mut m = Vec::new();
+        emit_varint_field(&mut m, 2, 300);
+        emit_wire2_field(&mut m, 1, b"a string value");
+        emit_varint_field(&mut m, 49, 1);
+        for len in 0..m.len() {
+            if let Ok(fs) = parse_fields(&m[..len]) {
+                // Readers must also stay in bounds on a short-but-parsable prefix.
+                let _ = read_varint_field(&m[..len], &fs, 2);
+                let _ = read_string_field(&m[..len], &fs, 1);
+                let _ = read_currency(&m[..len], &fs);
+            }
+        }
     }
 
     #[test]

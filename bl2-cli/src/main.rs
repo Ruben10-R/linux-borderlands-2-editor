@@ -702,10 +702,27 @@ fn cmd_set_badass_rank(profile: &Path, rank: i32, w: WriteOpts) -> Result<(), Sa
     Ok(())
 }
 
+/// Escape a string for embedding in a JSON string literal.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn cmd_code_index(file: &Path) -> Result<(), SaveError> {
     let text = std::fs::read_to_string(file)?;
     let codes = bl2_save::extract_codes(&text);
-    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let esc = json_escape;
     let mut ok = 0usize;
     println!("[");
     let mut first = true;
@@ -924,7 +941,7 @@ fn edit(
 }
 
 /// BL2's Aspyr port uses Steam Auto-Cloud, which can revert on-disk edits at
-/// launch. Warn when writing into a savedata directory. (See PLAN.md §4.1.)
+/// launch. Warn when writing into a savedata directory.
 fn warn_if_steam_cloud(path: &Path) {
     let p = path.to_string_lossy().to_lowercase();
     if p.contains("savedata") {
@@ -932,6 +949,92 @@ fn warn_if_steam_cloud(path: &Path) {
             "  note    : this looks like a live savedata dir. Steam Auto-Cloud may\n\
              \x20           revert this edit at launch — quit Steam fully, then edit,\n\
              \x20           then let Steam upload on startup; and verify in-game."
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_class_accepts_names_and_paths() {
+        // Vault hunter names, class names, and raw def fragments all resolve.
+        for (input, expect) in [
+            ("axton", "GD_Soldier.Character.CharClass_Soldier"),
+            ("commando", "GD_Soldier.Character.CharClass_Soldier"),
+            ("MAYA", "GD_Siren.Character.CharClass_Siren"),
+            ("siren", "GD_Siren.Character.CharClass_Siren"),
+            ("salvador", "GD_Mercenary.Character.CharClass_Mercenary"),
+            ("gunzerker", "GD_Mercenary.Character.CharClass_Mercenary"),
+            ("zer0", "GD_Assassin.Character.CharClass_Assassin"),
+            ("assassin", "GD_Assassin.Character.CharClass_Assassin"),
+            (
+                "gaige",
+                "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer",
+            ),
+            (
+                "krieg",
+                "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass",
+            ),
+            (
+                "psycho",
+                "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass",
+            ),
+        ] {
+            let got = resolve_class(input)
+                .unwrap_or_else(|| panic!("'{input}' should resolve"))
+                .1;
+            assert_eq!(got, expect, "input '{input}'");
+        }
+        assert!(resolve_class("bandit").is_none());
+        assert!(resolve_class("").is_some(), "empty matches the first class");
+    }
+
+    #[test]
+    fn resolved_classes_build_a_valid_save() {
+        // Every keyword must produce a class the core actually accepts.
+        for kw in ["axton", "maya", "salvador", "zer0", "gaige", "krieg"] {
+            let (_, def) = resolve_class(kw).unwrap();
+            let save = SaveFile::new_character(def, "Test");
+            assert!(save.to_bytes().is_ok(), "{kw} produces a valid save");
+            assert_eq!(save.class_def().as_deref(), Some(def));
+        }
+    }
+
+    #[test]
+    fn json_escape_produces_valid_json_strings() {
+        assert_eq!(json_escape("plain"), "plain");
+        assert_eq!(json_escape(r#"a"b"#), r#"a\"b"#);
+        assert_eq!(json_escape(r"a\b"), r"a\\b");
+        assert_eq!(json_escape("a\nb\tc\rd"), "a\\nb\\tc\\rd");
+        assert_eq!(json_escape("a\u{0}b"), "a\\u0000b");
+        // A BL2 code's characters (including / and +) pass through untouched.
+        assert_eq!(json_escape("BL2(aa/bb+cc)"), "BL2(aa/bb+cc)");
+    }
+
+    #[test]
+    fn write_opts_default_to_in_place_with_backup() {
+        // The flag combination that decides where bytes land, exercised via the
+        // same expressions the commands use.
+        let w = WriteOpts {
+            out: None,
+            no_backup: false,
+            dry_run: false,
+        };
+        let sav = Path::new("save0001.sav");
+        assert_eq!(w.out.as_deref().unwrap_or(sav), sav, "defaults to in place");
+        assert!(!w.no_backup, "backups on by default");
+
+        let w = WriteOpts {
+            out: Some(PathBuf::from("other.sav")),
+            no_backup: true,
+            dry_run: true,
+        };
+        assert_eq!(
+            w.out.as_deref().unwrap_or(sav),
+            Path::new("other.sav"),
+            "--out redirects"
         );
     }
 }
