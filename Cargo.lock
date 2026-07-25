@@ -509,6 +509,7 @@ dependencies = [
  "bl2-save",
  "eframe",
  "egui",
+ "js-sys",
  "log",
  "wasm-bindgen-futures",
  "web-sys",

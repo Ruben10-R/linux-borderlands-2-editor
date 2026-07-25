@@ -4,5 +4,6 @@
 //! (served by `docker compose up`). It is a thin, read-only view over `bl2-save`.
 
 mod app;
+mod io;
 mod theme;
 pub use app::App;

@@ -1,24 +1,34 @@
-use bl2_save::SaveFile;
+use std::path::PathBuf;
+
+use bl2_save::{SaveError, SaveFile};
 use eframe::egui;
 
 use crate::theme;
 
-/// The read-only viewer application state.
+const MAX: i64 = i32::MAX as i64; // currency/level/xp are int32 in the save
+
+/// The editable viewer application state.
 #[derive(Default)]
 pub struct App {
-    loaded: Option<Loaded>,
-    error: Option<String>,
+    doc: Option<Doc>,
+    /// (is_error, message) shown under the fields.
+    status: Option<(bool, String)>,
     theme: theme::Theme,
 }
 
-/// Everything we display for one loaded save (all read-only).
-struct Loaded {
-    file: String,
+/// One loaded save: the parsed file plus editable scratch values.
+struct Doc {
+    save: SaveFile,
+    name: String,
+    /// Present on native (where we can write back); always `None` on web,
+    /// where it is unused (the web build downloads instead of writing).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    path: Option<PathBuf>,
     class: String,
-    level: i64,
-    xp: i64,
     money: i64,
     eridium: i64,
+    level: i64,
+    xp: i64,
 }
 
 impl App {
@@ -28,29 +38,28 @@ impl App {
         app
     }
 
-    /// Parse dropped bytes into the display model, or record the error.
-    fn load(&mut self, name: String, bytes: &[u8]) {
+    fn load(&mut self, name: String, path: Option<PathBuf>, bytes: &[u8]) {
         match SaveFile::from_bytes(bytes) {
             Ok(s) => {
-                self.loaded = Some(Loaded {
-                    file: name,
+                self.doc = Some(Doc {
                     class: s.class_name().unwrap_or_else(|| "Unknown".into()),
                     level: s.level().unwrap_or(0),
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
                     eridium: s.eridium(),
+                    name,
+                    path,
+                    save: s,
                 });
-                self.error = None;
+                self.status = Some((false, "Loaded.".to_string()));
             }
             Err(e) => {
-                self.error = Some(e.to_string());
-                self.loaded = None;
+                self.doc = None;
+                self.status = Some((true, e.to_string()));
             }
         }
     }
 
-    /// Handle any file dropped onto the window this frame. On web the bytes are
-    /// delivered directly; on native we get a path and read it ourselves.
     fn handle_dropped(&mut self, ctx: &egui::Context) {
         let Some(f) = ctx.input(|i| i.raw.dropped_files.first().cloned()) else {
             return;
@@ -62,28 +71,70 @@ impl App {
         } else {
             "(dropped file)".to_string()
         };
+        let path = f.path.clone();
 
         if let Some(bytes) = &f.bytes {
-            self.load(name, bytes);
-        } else if let Some(path) = &f.path {
-            match std::fs::read(path) {
-                Ok(b) => self.load(name, &b),
-                Err(e) => {
-                    self.error = Some(format!("could not read {}: {e}", path.display()));
-                    self.loaded = None;
-                }
+            self.load(name, path, bytes);
+        } else if let Some(p) = &f.path {
+            match std::fs::read(p) {
+                Ok(b) => self.load(name, path, &b),
+                Err(e) => self.status = Some((true, format!("could not read {}: {e}", p.display()))),
             }
         }
+    }
+
+    /// Apply the edited scratch values and write them out (disk on native,
+    /// download on web), updating `status`.
+    fn save_current(&mut self) {
+        let Some(doc) = self.doc.as_mut() else {
+            return;
+        };
+        if let Err(e) = apply_edits(doc) {
+            self.status = Some((true, format!("edit failed: {e}")));
+            return;
+        }
+        self.status = Some(persist(doc));
+    }
+}
+
+/// Push the scratch values into the save via the guarded setters.
+fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
+    doc.save.set_money(doc.money.clamp(0, MAX))?;
+    doc.save.set_eridium(doc.eridium.clamp(0, MAX))?;
+    doc.save.set_level(doc.level.clamp(0, MAX))?;
+    doc.save.set_xp(doc.xp.clamp(0, MAX))?;
+    Ok(())
+}
+
+/// Native: write back to the loaded file with an automatic `.bak` backup.
+#[cfg(not(target_arch = "wasm32"))]
+fn persist(doc: &mut Doc) -> (bool, String) {
+    match &doc.path {
+        Some(path) => match doc.save.save(path, true) {
+            Ok(()) => (false, format!("Saved {} (backup written alongside).", path.display())),
+            Err(e) => (true, format!("save failed: {e}")),
+        },
+        None => (true, "no file path to write to".to_string()),
+    }
+}
+
+/// Web: browsers can't write to disk, so download the edited bytes.
+#[cfg(target_arch = "wasm32")]
+fn persist(doc: &mut Doc) -> (bool, String) {
+    match doc.save.to_bytes() {
+        Ok(bytes) => {
+            crate::io::download(&doc.name, &bytes);
+            (false, format!("Downloaded edited {}.", doc.name))
+        }
+        Err(e) => (true, format!("encode failed: {e}")),
     }
 }
 
 impl eframe::App for App {
-    // eframe 0.34 hands us a root `Ui`; panels go in via `show_inside`.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_dropped(&ctx);
 
-        // Bottom hint (added before the central panel so layout is correct).
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             egui::Panel::bottom("drop_hint").show_inside(ui, |ui| {
                 ui.centered_and_justified(|ui| ui.label("⤵ Drop to load"));
@@ -99,16 +150,9 @@ impl eframe::App for App {
                 theme::emblem(ui, 44.0, accent);
                 ui.add_space(10.0);
                 ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("BL2 SAVE EDITOR").color(accent).size(24.0).strong());
                     ui.label(
-                        egui::RichText::new("BL2 SAVE EDITOR")
-                            .color(accent)
-                            .size(24.0)
-                            .strong(),
-                    );
-                    ui.label(
-                        egui::RichText::new("read-only save viewer")
-                            .color(self.theme.text())
-                            .italics(),
+                        egui::RichText::new("edit your General stats").color(self.theme.text()).italics(),
                     );
                 });
             });
@@ -127,49 +171,72 @@ impl eframe::App for App {
 
             ui.add_space(4.0);
             ui.separator();
-            ui.label("Drag a .sav file onto this window to inspect it.");
+            ui.label("Drag a .sav file onto this window to load it.");
             ui.add_space(6.0);
 
-            if let Some(err) = &self.error {
-                ui.colored_label(theme::DANGER, format!("⚠ {err}"));
-            }
-
-            let accent = self.theme.accent();
-            match &self.loaded {
-                Some(s) => {
+            if self.doc.is_some() {
+                let accent = self.theme.accent();
+                {
+                    let doc = self.doc.as_mut().unwrap();
                     egui::Grid::new("general")
                         .num_columns(2)
                         .spacing([24.0, 8.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            field(ui, "File", &s.file, accent);
-                            field(ui, "Class", &s.class, accent);
-                            field(ui, "Level", &s.level.to_string(), accent);
-                            field(ui, "XP", &s.xp.to_string(), accent);
+                            field(ui, "File", &doc.name, accent);
+                            field(ui, "Class", &doc.class, accent);
+
+                            key(ui, "Level", accent);
+                            edit_number(ui, &mut doc.level, 1.0);
+                            ui.end_row();
+
+                            key(ui, "XP", accent);
+                            edit_number(ui, &mut doc.xp, 1000.0);
+                            ui.end_row();
 
                             key(ui, "Money", accent);
                             ui.horizontal(|ui| {
                                 theme::coin(ui, 16.0);
-                                ui.monospace(s.money.to_string());
+                                edit_number(ui, &mut doc.money, 5000.0);
                             });
                             ui.end_row();
 
                             key(ui, "Eridium", accent);
                             ui.horizontal(|ui| {
                                 theme::eridium(ui, 16.0);
-                                ui.monospace(s.eridium.to_string());
+                                edit_number(ui, &mut doc.eridium, 1.0);
                             });
                             ui.end_row();
                         });
+                } // doc borrow ends
+
+                ui.add_space(12.0);
+                let label = if cfg!(target_arch = "wasm32") {
+                    "⬇  Download edited save"
+                } else {
+                    "💾  Save (with backup)"
+                };
+                if ui.button(egui::RichText::new(label).strong()).clicked() {
+                    self.save_current();
                 }
-                None if self.error.is_none() => {
-                    ui.add_space(8.0);
-                    ui.weak("No save loaded yet.");
-                }
-                None => {}
+            } else {
+                ui.add_space(8.0);
+                ui.weak("No save loaded yet.");
+            }
+
+            if let Some((is_err, msg)) = &self.status {
+                ui.add_space(8.0);
+                let col = if *is_err { theme::DANGER } else { self.theme.accent() };
+                ui.colored_label(col, msg);
             }
         });
     }
+}
+
+/// A clamped integer editor (typed entry + drag), kept in `0..=i32::MAX`.
+fn edit_number(ui: &mut egui::Ui, value: &mut i64, speed: f64) {
+    ui.add(egui::DragValue::new(value).speed(speed));
+    *value = (*value).clamp(0, MAX);
 }
 
 /// A bold accent-coloured key label (left column of the grid).
@@ -177,7 +244,7 @@ fn key(ui: &mut egui::Ui, text: &str, accent: egui::Color32) {
     ui.label(egui::RichText::new(text).color(accent).strong());
 }
 
-/// A full "key : value" grid row with a monospace value.
+/// A read-only "key : value" grid row with a monospace value.
 fn field(ui: &mut egui::Ui, k: &str, value: &str, accent: egui::Color32) {
     key(ui, k, accent);
     ui.monospace(value);

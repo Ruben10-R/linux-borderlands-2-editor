@@ -10,7 +10,8 @@ egui = "0.34"
 eframe = "0.34"
 log = "0.4"
 
-# Web-only: wasm entry point + DOM access (used by src/main.rs under wasm32).
+# Web-only: wasm entry point, DOM access, and the "download edited save" plumbing.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
-web-sys = "0.3"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Blob", "Url", "HtmlAnchorElement"] }
