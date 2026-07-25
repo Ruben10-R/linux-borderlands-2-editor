@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bl2_save::{Location, ProfileFile, SaveError, SaveFile};
+use bl2_save::{ImportGroup, Location, ProfileFile, SaveError, SaveFile};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -199,6 +199,52 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Level every backpack + bank item/weapon to the character's own level.
+    SyncItemLevels {
+        sav: PathBuf,
+        /// Also level "no-level" items (grade ≤ 1).
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Create a new level-1 character (like Gibbed's "New").
+    New {
+        /// Class keyword: axton/commando, maya/siren, salvador/gunzerker,
+        /// zer0/assassin, gaige/mechromancer, krieg/psycho.
+        class: String,
+        /// The character's in-game name.
+        name: String,
+        /// Where to write the new .sav.
+        out: PathBuf,
+        /// Overwrite the output file if it already exists (backs it up first).
+        #[arg(long)]
+        force: bool,
+    },
+    /// Copy groups (skills/missions/world/stats) from another save into this one.
+    Import {
+        /// The character save to import INTO (edited in place, with backup).
+        sav: PathBuf,
+        /// The source save to copy FROM.
+        source: PathBuf,
+        /// Skill tree + unspent skill points.
+        #[arg(long)]
+        skills: bool,
+        /// Mission progress (all playthroughs).
+        #[arg(long)]
+        missions: bool,
+        /// Fast-travel unlocks, map discovery, playthrough.
+        #[arg(long)]
+        world: bool,
+        /// Stats, challenges, and total play time.
+        #[arg(long)]
+        stats: bool,
+        /// Copy all four groups.
+        #[arg(long)]
+        all: bool,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
 }
 
 #[derive(Args)]
@@ -320,7 +366,124 @@ fn run() -> Result<(), SaveError> {
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
         Cmd::ImportCode { sav, code, bank, w } => cmd_import_code(&sav, &code, bank, w),
+        Cmd::SyncItemLevels { sav, force, w } => cmd_sync_item_levels(&sav, force, w),
+        Cmd::New {
+            class,
+            name,
+            out,
+            force,
+        } => cmd_new(&class, &name, &out, force),
+        Cmd::Import {
+            sav,
+            source,
+            skills,
+            missions,
+            world,
+            stats,
+            all,
+            w,
+        } => cmd_import(
+            &sav,
+            &source,
+            [skills || all, missions || all, world || all, stats || all],
+            w,
+        ),
     }
+}
+
+/// Match a class keyword (name or class-def fragment) to one of the six classes.
+fn resolve_class(input: &str) -> Option<(&'static str, &'static str)> {
+    let n = input.to_lowercase();
+    bl2_save::CLASSES.iter().copied().find(|(display, def)| {
+        display.to_lowercase().contains(&n) || def.to_lowercase().contains(&n)
+    })
+}
+
+fn cmd_new(class: &str, name: &str, out: &Path, force: bool) -> Result<(), SaveError> {
+    let Some((display, class_def)) = resolve_class(class) else {
+        eprintln!("unknown class '{class}'. Try: axton, maya, salvador, zer0, gaige, krieg.");
+        return Ok(());
+    };
+    if out.exists() && !force {
+        eprintln!(
+            "{} already exists (use --force to overwrite)",
+            out.display()
+        );
+        return Ok(());
+    }
+    let s = SaveFile::new_character(class_def, name);
+    let backup = out.exists();
+    s.save(out, backup)?;
+    println!("== new character ==");
+    println!("  class   : {display}");
+    println!("  name    : {name}");
+    println!("  wrote   : {}", out.display());
+    if backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_import(sav: &Path, source: &Path, groups: [bool; 4], w: WriteOpts) -> Result<(), SaveError> {
+    if !groups.iter().any(|g| *g) {
+        eprintln!("pick a group: --skills --missions --world --stats (or --all)");
+        return Ok(());
+    }
+    let mut s = SaveFile::load(sav)?;
+    let src = SaveFile::load(source)?;
+    let all = [
+        ImportGroup::Skills,
+        ImportGroup::Missions,
+        ImportGroup::World,
+        ImportGroup::Stats,
+    ];
+    println!("== import ==");
+    println!("  into    : {}", sav.display());
+    println!("  from    : {}", source.display());
+    for (g, on) in all.iter().zip(groups) {
+        if on {
+            s.import_group(&src, *g)?;
+            println!("  imported: {}", g.label());
+        }
+    }
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let out = w.out.as_deref().unwrap_or(sav);
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_sync_item_levels(sav: &Path, force: bool, w: WriteOpts) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    let level = s.level().unwrap_or(0);
+    let n = s.set_all_item_levels(level, force)?;
+    let out = w.out.as_deref().unwrap_or(sav);
+    println!("== sync item levels ==");
+    println!("  input   : {}", sav.display());
+    println!("  leveled : {n} items/weapons -> character Lv {level}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
 }
 
 fn cmd_part_catalog(sav: &Path, id: usize, filter: &str) -> Result<(), SaveError> {

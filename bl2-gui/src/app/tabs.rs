@@ -462,6 +462,17 @@ pub(super) fn items_tab(
                 v.level = lvl;
             }
         }
+        let char_level = doc.level.clamp(1, 127);
+        if ui
+            .button(format!("Sync to character level ({char_level})"))
+            .on_hover_text("Levels every item (both bags) to your character's level. Locked ⚠ items are left alone.")
+            .clicked()
+        {
+            doc.item_level = char_level;
+            for v in doc.items.iter_mut().filter(|v| v.levelable) {
+                v.level = char_level;
+            }
+        }
     });
     ui.add_space(4.0);
 
