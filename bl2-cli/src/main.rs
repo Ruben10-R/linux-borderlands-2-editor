@@ -115,6 +115,13 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set specialist skill points.
+    SetSpecialistPoints {
+        sav: PathBuf,
+        points: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set the unlocked Overpower level (0 clears it; needs lvl 72 + UVHM).
     SetOpLevel {
         sav: PathBuf,
@@ -219,6 +226,13 @@ fn run() -> Result<(), SaveError> {
             "current playthrough",
             |s| s.active_playthrough(),
             |s| s.set_active_playthrough(index.clamp(0, 2)),
+        ),
+        Cmd::SetSpecialistPoints { sav, points, w } => edit(
+            &sav,
+            w,
+            "specialist points",
+            |s| s.specialist_skill_points().unwrap_or(0),
+            |s| s.set_specialist_skill_points(points.max(0)),
         ),
         Cmd::SetOpLevel { sav, level, w } => edit(
             &sav,
@@ -343,7 +357,8 @@ fn cmd_raw(sav: &Path) -> Result<(), SaveError> {
     let s = SaveFile::load(sav)?;
     println!("== raw protobuf fields of {} ==", sav.display());
     for f in s.raw_fields()? {
-        println!("  #{:<3} {:<8} len {:<6} {}", f.number, f.kind, f.len, f.preview);
+        let name = if f.name.is_empty() { format!("#{}", f.number) } else { f.name.to_string() };
+        println!("  {name:<24} {:<11} {}", f.kind, f.preview);
     }
     Ok(())
 }

@@ -18,9 +18,12 @@ mod customizations;
 mod error;
 mod gameinfo;
 mod items;
+mod levels;
 mod proto;
 mod serial;
 mod stations;
+
+pub use levels::{level_for_xp, xp_for_level};
 
 pub use customizations::Customization;
 pub use error::{Result, SaveError};
@@ -92,38 +95,86 @@ impl SaveFile {
         proto::parse_fields(&self.proto)
     }
 
-    /// A read-only summary of every top-level protobuf field, in file order —
-    /// for the Raw inspector. Varints show their value; length-delimited fields
-    /// show a UTF-8 preview when printable, else a byte count.
+    /// A named, grouped summary of every top-level protobuf field, in first-seen
+    /// order — for the Raw inspector. Single-occurrence varint/string fields are
+    /// exposed as editable `value`/`text`; repeated or nested fields are summarised.
     pub fn raw_fields(&self) -> Result<Vec<RawField>> {
         let fields = self.fields()?;
-        let mut out = Vec::with_capacity(fields.len());
+        let mut out = Vec::new();
+        let mut seen: Vec<u64> = Vec::new();
         for f in &fields {
-            let (kind, preview) = match f.wire_type {
-                0 => (
-                    "varint",
-                    proto::read_varint_value(&self.proto, f.val_start)
-                        .map(|v| v.to_string())
-                        .unwrap_or_default(),
-                ),
-                2 => {
-                    let content = proto::wire2_content(&self.proto, f)?;
-                    let printable = !content.is_empty()
-                        && content.iter().all(|&b| b == b'\t' || b == b'\n' || (0x20..0x7f).contains(&b));
-                    let preview = if printable {
-                        format!("{:?}", String::from_utf8_lossy(content))
-                    } else {
-                        format!("<{} bytes>", content.len())
-                    };
-                    ("bytes", preview)
-                }
-                1 => ("fixed64", format!("<{} bytes>", f.end - f.val_start)),
-                5 => ("fixed32", format!("<{} bytes>", f.end - f.val_start)),
-                _ => ("?", String::new()),
+            if seen.contains(&f.number) {
+                continue;
+            }
+            seen.push(f.number);
+            let occ: Vec<&proto::Field> = fields.iter().filter(|x| x.number == f.number).collect();
+            let name = proto::field_name(f.number);
+            let mut rf = RawField {
+                number: f.number,
+                name,
+                kind: "bytes",
+                count: occ.len(),
+                value: None,
+                text: None,
+                preview: String::new(),
             };
-            out.push(RawField { number: f.number, kind, len: f.end - f.val_start, preview });
+            if occ.len() > 1 {
+                rf.kind = "collection";
+                rf.preview = format!("{} entries", occ.len());
+            } else {
+                match f.wire_type {
+                    0 => {
+                        let v = proto::read_varint_value(&self.proto, f.val_start).unwrap_or(0);
+                        rf.kind = "varint";
+                        rf.value = Some(v);
+                        rf.preview = v.to_string();
+                    }
+                    2 => {
+                        let content = proto::wire2_content(&self.proto, f)?;
+                        let printable = !content.is_empty()
+                            && content.iter().all(|&b| b == b'\t' || b == b'\n' || (0x20..0x7f).contains(&b));
+                        if printable {
+                            let s = String::from_utf8_lossy(content).into_owned();
+                            rf.kind = "string";
+                            rf.preview = format!("{s:?}");
+                            rf.text = Some(s);
+                        } else {
+                            rf.kind = "message";
+                            rf.preview = format!("(message, {} bytes)", content.len());
+                        }
+                    }
+                    1 => {
+                        rf.kind = "fixed64";
+                        rf.preview = "(8 bytes)".into();
+                    }
+                    5 => {
+                        rf.kind = "fixed32";
+                        rf.preview = "(4 bytes)".into();
+                    }
+                    _ => {}
+                }
+            }
+            out.push(rf);
         }
         Ok(out)
+    }
+
+    /// Set a single top-level varint field (Raw editor). Only that field changes.
+    pub fn set_raw_varint(&mut self, number: u64, value: i64) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::upsert_varint_field(&self.proto, &fields, number, value);
+        proto::only_fields_changed(&self.proto, &new, &[number])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Set a single top-level UTF-8 string field (Raw editor). Only that field changes.
+    pub fn set_raw_string(&mut self, number: u64, value: &str) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::rewrite_string_field(&self.proto, &fields, number, value)?;
+        proto::only_fields_changed(&self.proto, &new, &[number])?;
+        self.proto = new;
+        Ok(())
     }
 
     /// Human-readable character/class name (e.g. "Zer0 (Assassin)").
@@ -145,10 +196,16 @@ impl SaveFile {
         proto::read_varint_field(&self.proto, &fields, proto::FIELD_XP)
     }
 
-    /// Available skill points.
+    /// Available (general) skill points.
     pub fn skill_points(&self) -> Option<i64> {
         let fields = self.fields().ok()?;
         proto::read_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS)
+    }
+
+    /// Specialist skill points (the second pool, used by some class mechanics).
+    pub fn specialist_skill_points(&self) -> Option<i64> {
+        let fields = self.fields().ok()?;
+        proto::read_varint_field(&self.proto, &fields, proto::FIELD_SPECIALIST_SKILL_POINTS)
     }
 
     /// Playthroughs completed (0–3). 1 = TVHM unlocked, 2 = UVHM unlocked.
@@ -353,6 +410,20 @@ impl SaveFile {
         Ok(())
     }
 
+    /// Set specialist skill points (added if the field is absent).
+    pub fn set_specialist_skill_points(&mut self, value: i64) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::upsert_varint_field(
+            &self.proto,
+            &fields,
+            proto::FIELD_SPECIALIST_SKILL_POINTS,
+            value,
+        );
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_SPECIALIST_SKILL_POINTS])?;
+        self.proto = new;
+        Ok(())
+    }
+
     /// Set playthroughs completed (0–3). 1 unlocks TVHM, 2 unlocks UVHM.
     pub fn set_playthroughs_completed(&mut self, value: i64) -> Result<()> {
         let fields = self.fields()?;
@@ -477,15 +548,23 @@ pub const CLASSES: [(&str, &str); 6] = [
     ("Krieg (Psycho)", "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"),
 ];
 
-/// A read-only view of one top-level protobuf field, for the Raw inspector.
+/// A grouped view of one top-level protobuf field number, for the Raw inspector.
+/// Single-occurrence scalar fields expose an editable `value`/`text`; repeated or
+/// nested fields are summarised in `preview`.
 #[derive(Clone, Debug)]
 pub struct RawField {
     pub number: u64,
-    /// Wire-type label: "varint", "bytes", "fixed32", "fixed64".
+    /// Human field name (from the save schema), or "" if unknown.
+    pub name: &'static str,
+    /// "varint", "string", "message", "collection", "bytes", "fixed32/64".
     pub kind: &'static str,
-    /// Byte length of the field value.
-    pub len: usize,
-    /// Human preview: varint value, quoted string, or "<N bytes>".
+    /// Number of occurrences of this field number.
+    pub count: usize,
+    /// Editable value for a single-occurrence varint field.
+    pub value: Option<i64>,
+    /// Editable value for a single-occurrence UTF-8 string field.
+    pub text: Option<String>,
+    /// Human summary (value, quoted string, "(message, N bytes)", "N entries").
     pub preview: String,
 }
 
@@ -880,5 +959,22 @@ mod tests {
             o2.items().unwrap().len()
         }, "no duplicate OP virtual items");
         eprintln!("golden: OP level {:?} -> 10", save.op_level());
+
+        // XP<->level sync table + raw named/grouped fields + raw edit.
+        assert_eq!(xp_for_level(1), 0);
+        assert_eq!(xp_for_level(72), xp_for_level(72));
+        assert_eq!(level_for_xp(xp_for_level(50)), 50, "level_for_xp inverts xp_for_level");
+        assert_eq!(level_for_xp(0), 1);
+        let raw = save.raw_fields().unwrap();
+        let class = raw.iter().find(|r| r.number == 1).expect("field 1");
+        assert_eq!(class.name, "class");
+        assert!(class.text.is_some(), "class is an editable string field");
+        assert!(raw.iter().any(|r| r.number == 8 && r.kind == "collection"), "skills is a collection");
+        // Raw edit of a scalar varint (mission_number, field 21) touches only it.
+        let mut r = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        r.set_raw_varint(proto::FIELD_LEVEL, 55).unwrap();
+        assert_eq!(r.level(), Some(55));
+        assert_eq!(r.money(), save.money(), "raw edit must not touch money");
+        eprintln!("golden: raw fields {} groups; sync/raw ok", raw.len());
     }
 }

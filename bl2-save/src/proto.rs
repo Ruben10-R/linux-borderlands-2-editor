@@ -14,7 +14,8 @@ use crate::error::{Result, SaveError};
 pub const FIELD_CLASS: u64 = 1; // PlayerClassDefinition path (string)
 pub const FIELD_LEVEL: u64 = 2; // experience level (varint)
 pub const FIELD_XP: u64 = 3; // experience points (varint)
-pub const FIELD_SKILL_POINTS: u64 = 4; // available skill points (varint)
+pub const FIELD_SKILL_POINTS: u64 = 4; // available (general) skill points (varint)
+pub const FIELD_SPECIALIST_SKILL_POINTS: u64 = 5; // specialist skill points (varint)
 pub const FIELD_CURRENCY: u64 = 6; // currency_on_hand (packed repeated int32)
 pub const FIELD_PLAYTHROUGHS_COMPLETED: u64 = 7; // playthroughs finished (varint)
 pub const FIELD_APPEARANCE: u64 = 19; // appearance message; sub-field 1 = name (string)
@@ -26,6 +27,48 @@ pub const IDX_MONEY: usize = 0;
 pub const IDX_ERIDIUM: usize = 1;
 pub const IDX_SERAPH: usize = 2;
 pub const IDX_TORGUE: usize = 4;
+
+/// Human name for a top-level save field number (from apocalyptech's save
+/// structure), for the Raw inspector. "" if unknown.
+pub fn field_name(number: u64) -> &'static str {
+    match number {
+        1 => "class",
+        2 => "level",
+        3 => "experience",
+        4 => "general_skill_points",
+        5 => "specialist_skill_points",
+        6 => "currency_on_hand",
+        7 => "playthroughs_completed",
+        8 => "skills",
+        11 => "resources",
+        13 => "inventory_sizes",
+        15 => "stats",
+        16 => "active_fast_travel",
+        17 => "last_fast_travel",
+        18 => "missions",
+        19 => "appearance",
+        20 => "save_game_id",
+        21 => "mission_number",
+        23 => "unlocks",
+        24 => "unlock_notifications",
+        25 => "time_played",
+        26 => "save_timestamp",
+        29 => "game_stages",
+        30 => "areas",
+        34 => "save_guid",
+        35 => "wearing",
+        36 => "black_market",
+        37 => "active_mission",
+        38 => "challenges",
+        41 => "bank",
+        43 => "lockouts",
+        46 => "explored_areas",
+        49 => "active_playthrough",
+        53 => "items",
+        54 => "weapons",
+        _ => "",
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct Field {

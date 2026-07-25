@@ -68,6 +68,7 @@ struct Doc {
     head: String,
     skin: String,
     skill_points: i64,
+    specialist_skill_points: i64,
     playthroughs_completed: i64,
     active_playthrough: i64,
     op_level: i64,
@@ -92,6 +93,8 @@ struct Doc {
     import_code: String,
     /// Items sub-tab: false = Backpack, true = Bank.
     show_bank: bool,
+    /// Search filter for the Raw inspector.
+    raw_filter: String,
     /// Scratch set of unlocked fast-travel station resource_names (field 16).
     unlocked: std::collections::HashSet<String>,
 }
@@ -192,6 +195,7 @@ impl App {
                     head: s.wearing().first().cloned().unwrap_or_else(|| "0".into()),
                     skin: s.wearing().get(4).cloned().unwrap_or_else(|| "0".into()),
                     skill_points: s.skill_points().unwrap_or(0),
+                    specialist_skill_points: s.specialist_skill_points().unwrap_or(0),
                     playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
                     active_playthrough: s.active_playthrough(),
                     op_level: s.op_level().unwrap_or(0),
@@ -210,6 +214,7 @@ impl App {
                     part_catalog_key: None,
                     import_code: String::new(),
                     show_bank: false,
+                    raw_filter: String::new(),
                     unlocked: s.visited_stations().into_iter().collect(),
                     name,
                     path,
@@ -280,6 +285,7 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_level(doc.level.clamp(0, MAX))?;
     doc.save.set_xp(doc.xp.clamp(0, MAX))?;
     doc.save.set_skill_points(doc.skill_points.clamp(0, MAX))?;
+    doc.save.set_specialist_skill_points(doc.specialist_skill_points.clamp(0, MAX))?;
     doc.save.set_playthroughs_completed(doc.playthroughs_completed.clamp(0, 3))?;
     doc.save.set_active_playthrough(doc.active_playthrough.clamp(0, 2))?;
     // OP level — only rewrite the virtual item if it actually changed.
@@ -596,17 +602,30 @@ fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         ui.end_row();
 
         key(ui, "Level", accent);
-        edit_number(ui, &mut doc.level, 1.0);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.level, 1.0);
+            if ui.button("Sync").on_hover_text("Set XP to the minimum for this level").clicked() {
+                doc.xp = bl2_save::xp_for_level(doc.level);
+            }
+        });
         ui.end_row();
         key(ui, "XP", accent);
-        edit_number(ui, &mut doc.xp, 1000.0);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.xp, 1000.0);
+            if ui.button("Sync").on_hover_text("Set level to match this XP").clicked() {
+                doc.level = bl2_save::level_for_xp(doc.xp);
+            }
+        });
         ui.end_row();
         key(ui, "Skill Points", accent);
         edit_number(ui, &mut doc.skill_points, 1.0);
         ui.end_row();
+        key(ui, "Specialist Points", accent);
+        edit_number(ui, &mut doc.specialist_skill_points, 1.0);
+        ui.end_row();
     });
     ui.add_space(4.0);
-    ui.weak("Changing class does not reset skills — level/skill mismatch may look odd in-game.");
+    ui.weak("Changing class does not reset skills — level/skill mismatch may look odd in-game. \u{201c}Sync\u{201d} keeps Level and XP consistent.");
 }
 
 /// A head/skin picker for the character's class. Writes the chosen asset path
@@ -941,22 +960,53 @@ fn fast_travel_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
 fn raw_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     ui.horizontal(|ui| {
         theme::page(ui, 20.0, accent);
-        ui.label(egui::RichText::new("Raw protobuf fields").color(accent).size(18.0).strong());
+        ui.label(egui::RichText::new("Raw fields").color(accent).size(18.0).strong());
     });
-    ui.weak("Read-only inspector — every top-level field of the decoded save, in file order.");
+    ui.weak(
+        "Named top-level save fields. Single scalar fields (varint/string) are editable inline — \
+         changes apply immediately. Advanced: back up first.",
+    );
     ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Search:");
+        ui.add(egui::TextEdit::singleline(&mut doc.raw_filter).hint_text("field name or number…"));
+        if ui.button("✕").clicked() {
+            doc.raw_filter.clear();
+        }
+    });
+    ui.add_space(2.0);
+
+    let needle = doc.raw_filter.to_lowercase();
     let fields = doc.save.raw_fields().unwrap_or_default();
-    egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-        egui::Grid::new("raw_grid").num_columns(4).spacing([14.0, 3.0]).striped(true).show(ui, |ui| {
-            for h in ["#", "type", "len", "value"] {
-                ui.label(egui::RichText::new(h).color(accent).strong());
-            }
+    egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+        egui::Grid::new("raw_grid").num_columns(3).spacing([16.0, 4.0]).striped(true).show(ui, |ui| {
+            ui.label(egui::RichText::new("field").color(accent).strong());
+            ui.label(egui::RichText::new("type").color(accent).strong());
+            ui.label(egui::RichText::new("value").color(accent).strong());
             ui.end_row();
             for f in &fields {
-                ui.monospace(f.number.to_string());
-                ui.monospace(f.kind);
-                ui.monospace(f.len.to_string());
-                ui.monospace(&f.preview);
+                let label = if f.name.is_empty() { format!("field {}", f.number) } else { f.name.to_string() };
+                if !needle.is_empty()
+                    && !label.to_lowercase().contains(&needle)
+                    && !f.number.to_string().contains(&needle)
+                {
+                    continue;
+                }
+                ui.monospace(label).on_hover_text(format!("field #{}", f.number));
+                ui.weak(f.kind);
+                if let Some(v) = f.value {
+                    let mut v2 = v;
+                    if ui.add(egui::DragValue::new(&mut v2).speed(1.0)).changed() {
+                        let _ = doc.save.set_raw_varint(f.number, v2);
+                    }
+                } else if let Some(t) = &f.text {
+                    let mut t2 = t.clone();
+                    if ui.text_edit_singleline(&mut t2).changed() {
+                        let _ = doc.save.set_raw_string(f.number, &t2);
+                    }
+                } else {
+                    ui.monospace(&f.preview);
+                }
                 ui.end_row();
             }
         });
