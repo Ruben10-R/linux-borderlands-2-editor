@@ -55,6 +55,40 @@ pub fn read_items(protobuf: &[u8]) -> Result<Vec<Item>> {
     Ok(out)
 }
 
+/// Set every backpack + bank item/weapon to `level` (grade + game_stage),
+/// rebuilding the protobuf and preserving all other bytes. Returns the new
+/// protobuf and the number of items changed. Items that shouldn't be leveled
+/// (grade absent or <= 1) are left untouched unless `force` is set.
+pub fn relevel_all(protobuf: &[u8], level: i64, force: bool) -> Result<(Vec<u8>, usize)> {
+    let fields = proto::parse_fields(protobuf)?;
+    let mut out = Vec::with_capacity(protobuf.len());
+    let mut changed = 0;
+    for f in &fields {
+        let is_item_field = matches!(f.number, 41 | 53 | 54) && f.wire_type == 2;
+        if !is_item_field {
+            out.extend_from_slice(&protobuf[f.tag_start..f.end]);
+            continue;
+        }
+        let entry = proto::wire2_content(protobuf, f)?;
+        let ifields = proto::parse_fields(entry)?;
+        let new_entry = match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
+            Some(sf) => {
+                let serial = proto::wire2_content(entry, sf)?;
+                match serial::releveled(serial, level, force)? {
+                    Some(new_serial) => {
+                        changed += 1;
+                        proto::replace_field_content(entry, &ifields, 1, &new_serial)
+                    }
+                    None => entry.to_vec(),
+                }
+            }
+            None => entry.to_vec(),
+        };
+        proto::emit_wire2_field(&mut out, f.number, &new_entry);
+    }
+    Ok((out, changed))
+}
+
 /// The raw serial blobs (for round-trip testing against a real save).
 #[cfg(test)]
 pub(crate) fn raw_serials(protobuf: &[u8]) -> Result<Vec<Vec<u8>>> {

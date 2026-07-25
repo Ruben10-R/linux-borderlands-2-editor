@@ -31,6 +31,8 @@ struct Doc {
     level: i64,
     xp: i64,
     items: Vec<ItemView>,
+    item_level: i64,
+    force_levels: bool,
 }
 
 /// A read-only display row for one inventory item.
@@ -84,6 +86,8 @@ impl App {
                     money: s.money(),
                     eridium: s.eridium(),
                     items: build_item_views(&s),
+                    item_level: s.level().unwrap_or(50).clamp(1, 127),
+                    force_levels: false,
                     name,
                     path,
                     save: s,
@@ -131,6 +135,22 @@ impl App {
             return;
         }
         self.status = Some(persist(doc));
+    }
+
+    /// Set all items to the chosen level, refresh the list, report the count.
+    fn apply_item_levels(&mut self) {
+        let Some(doc) = self.doc.as_mut() else {
+            return;
+        };
+        let (lvl, force) = (doc.item_level.clamp(0, 127), doc.force_levels);
+        match doc.save.set_all_item_levels(lvl, force) {
+            Ok(n) => {
+                doc.items = build_item_views(&doc.save);
+                let verb = if cfg!(target_arch = "wasm32") { "Download" } else { "Save" };
+                self.status = Some((false, format!("Set {n} items to level {lvl}. Click {verb} to write.")));
+            }
+            Err(e) => self.status = Some((true, format!("item level edit failed: {e}"))),
+        }
     }
 }
 
@@ -266,6 +286,26 @@ impl eframe::App for App {
                 if cfg!(target_arch = "wasm32") {
                     ui.add_space(2.0);
                     ui.weak("Downloads a .sav — click \u{201c}How to install\u{201d} to put it in your game.");
+                }
+
+                // Item-level editor.
+                if self.doc.as_ref().is_some_and(|d| !d.items.is_empty()) {
+                    ui.add_space(8.0);
+                    let mut apply = false;
+                    {
+                        let doc = self.doc.as_mut().unwrap();
+                        ui.horizontal(|ui| {
+                            ui.label("Set all items to level");
+                            ui.add(egui::DragValue::new(&mut doc.item_level).speed(1.0));
+                            doc.item_level = doc.item_level.clamp(0, 127);
+                            ui.checkbox(&mut doc.force_levels, "force")
+                                .on_hover_text("Also level 'no-level' items (some class mods/relics).");
+                            apply = ui.button("Apply").clicked();
+                        });
+                    }
+                    if apply {
+                        self.apply_item_levels();
+                    }
                 }
             } else {
                 ui.add_space(8.0);

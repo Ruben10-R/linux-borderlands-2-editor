@@ -106,6 +106,34 @@ pub(crate) fn wire2_content<'a>(buf: &'a [u8], f: &Field) -> Result<&'a [u8]> {
         .ok_or_else(|| SaveError::Proto("length-delimited field runs past end".into()))
 }
 
+/// Append a length-delimited (wire type 2) field: tag + length + content.
+pub(crate) fn emit_wire2_field(out: &mut Vec<u8>, number: u64, content: &[u8]) {
+    encode_varint(out, (number << 3) | 2);
+    encode_varint(out, content.len() as u64);
+    out.extend_from_slice(content);
+}
+
+/// Rebuild a message with the first wire-2 field `number`'s content replaced,
+/// copying every other field byte-for-byte.
+pub(crate) fn replace_field_content(
+    msg: &[u8],
+    fields: &[Field],
+    number: u64,
+    new_content: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(msg.len());
+    let mut done = false;
+    for f in fields {
+        if !done && f.number == number && f.wire_type == 2 {
+            emit_wire2_field(&mut out, number, new_content);
+            done = true;
+        } else {
+            out.extend_from_slice(&msg[f.tag_start..f.end]);
+        }
+    }
+    out
+}
+
 /// Read a varint value at a byte offset (the value of a wire-0 field).
 pub(crate) fn read_varint_value(buf: &[u8], start: usize) -> Option<i64> {
     let mut p = start;

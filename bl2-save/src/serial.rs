@@ -215,6 +215,26 @@ pub(crate) fn reencode(data: &[u8]) -> Result<Vec<u8>> {
     Ok(wrap_raw(is_weapon, &values, key))
 }
 
+/// Return the serial re-leveled to `level` (both grade and game_stage), or None
+/// if the item shouldn't be leveled: no grade field, or grade <= 1 (a "no level"
+/// item like some class mods/relics) unless `force` is set. Mirrors apocalyptech.
+pub(crate) fn releveled(serial: &[u8], level: i64, force: bool) -> Result<Option<Vec<u8>>> {
+    let (is_weapon, mut values, key) = unwrap_raw(serial)?;
+    if values.first().and_then(|o| *o) == Some(255) {
+        return Ok(None); // virtual placeholder (e.g. OP-level marker) — never level
+    }
+    let grade = values.get(4).and_then(|o| *o);
+    match grade {
+        Some(g) if force || g > 1 => {
+            let lvl = level.clamp(0, 127) as u64; // grade/game_stage are 7-bit fields
+            values[4] = Some(lvl);
+            values[5] = Some(lvl);
+            Ok(Some(wrap_raw(is_weapon, &values, key)))
+        }
+        _ => Ok(None),
+    }
+}
+
 // ---- structured decode ----
 
 fn split(x: u64, bits: u32) -> PartRef {

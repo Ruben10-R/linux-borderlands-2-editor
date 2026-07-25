@@ -47,6 +47,16 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set every backpack + bank item and weapon to a level.
+    SetItemLevels {
+        sav: PathBuf,
+        level: i64,
+        /// Also level items the game marks as "no level" (grade ≤ 1).
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
 }
 
 #[derive(Args)]
@@ -90,7 +100,30 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetXp { sav, xp, w } => {
             edit(&sav, w, "xp", |s| s.xp().unwrap_or(0), |s| s.set_xp(xp))
         }
+        Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
     }
+}
+
+fn cmd_set_item_levels(sav: &Path, level: i64, force: bool, w: WriteOpts) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    let n = s.set_all_item_levels(level, force)?;
+    let out = w.out.as_deref().unwrap_or(sav);
+    println!("== set item levels ==");
+    println!("  input   : {}", sav.display());
+    println!("  leveled : {n} items/weapons -> Lv {level}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
 }
 
 fn cmd_info(sav: &Path) -> Result<(), SaveError> {

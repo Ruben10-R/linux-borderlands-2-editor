@@ -170,6 +170,17 @@ impl SaveFile {
     pub fn set_xp(&mut self, value: i64) -> Result<()> {
         self.set_varint(proto::FIELD_XP, value)
     }
+
+    /// Set every backpack + bank item and weapon to `level` (grade + game stage).
+    /// Items that shouldn't be leveled (grade absent or ≤ 1, e.g. some class
+    /// mods/relics) are skipped unless `force` is set. Returns the count changed.
+    /// Guarded so nothing outside the item fields (41/53/54) can change.
+    pub fn set_all_item_levels(&mut self, level: i64, force: bool) -> Result<usize> {
+        let (new, changed) = items::relevel_all(&self.proto, level, force)?;
+        proto::only_fields_changed(&self.proto, &new, &[41, 53, 54])?;
+        self.proto = new;
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -307,5 +318,18 @@ mod tests {
         eprintln!("golden: {}/{} real serials round-tripped", real, serials.len());
         // The typed list should decode without error too.
         let _ = save.items().expect("items() should succeed");
+
+        // Re-level every item to 50: must self-verify, change only item fields,
+        // and every non-placeholder item must then report level 50.
+        let mut leveled = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        let n = leveled.set_all_item_levels(50, true).expect("relevel");
+        let _ = leveled.to_bytes().expect("re-leveled save must self-verify");
+        assert_eq!(leveled.money(), save.money(), "re-leveling must not touch money");
+        for it in leveled.items().unwrap() {
+            if !it.serial.is_placeholder() {
+                assert_eq!(it.serial.stage, Some(50), "item should now be level 50");
+            }
+        }
+        eprintln!("golden: re-leveled {n} items to 50");
     }
 }
