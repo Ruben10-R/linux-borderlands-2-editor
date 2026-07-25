@@ -25,9 +25,11 @@ mod profile;
 mod proto;
 mod serial;
 mod stations;
+mod vehicles;
 
 pub use levels::{level_for_xp, xp_for_level};
 pub use profile::ProfileFile;
+pub use vehicles::{VehicleFamily, VehicleSkin, FAMILIES as VEHICLE_FAMILIES};
 
 pub use customizations::Customization;
 pub use error::{Result, SaveError};
@@ -289,6 +291,20 @@ impl SaveFile {
         let f = fields.iter().find(|f| f.number == 17 && f.wire_type == 2)?;
         let c = proto::wire2_content(&self.proto, f).ok()?;
         std::str::from_utf8(c).ok().map(str::to_string)
+    }
+
+    /// The chosen skin paths for a vehicle family (from field 57).
+    pub fn vehicle_family_skins(&self, family_path: &str) -> Vec<String> {
+        vehicles::family_skins(&self.proto, family_path)
+    }
+
+    /// Set a vehicle family's chosen skins (empty/"None" entries are dropped).
+    /// Only field 57 changes.
+    pub fn set_vehicle_skins(&mut self, family_path: &str, skins: &[String]) -> Result<()> {
+        let new = vehicles::set_family_skins(&self.proto, family_path, skins)?;
+        proto::only_fields_changed(&self.proto, &new, &[57])?;
+        self.proto = new;
+        Ok(())
     }
 
     /// Set the equipped head and skin paths (field 35 "wearing", indices 0 and 4),
@@ -705,6 +721,16 @@ pub fn customizations(class_def: &str, is_head: bool) -> Vec<Customization> {
     customizations::for_class(class_def, is_head)
 }
 
+/// Every skin usable by a vehicle family (by its token, e.g. "Runner").
+pub fn vehicle_skins(family_token: &str) -> &'static [VehicleSkin] {
+    vehicles::skins_for(family_token)
+}
+
+/// Display name for an equipped vehicle skin path, if known.
+pub fn vehicle_skin_name(path: &str) -> Option<&'static str> {
+    vehicles::skin_name(path)
+}
+
 /// Display name for an equipped head/skin path, if known.
 pub fn customization_name(path: &str) -> Option<&'static str> {
     customizations::name(path)
@@ -1076,6 +1102,21 @@ mod tests {
             assert_eq!(app.name(), save.name(), "wearing edit must not touch name");
             eprintln!("golden: equipped head {:?} + skin {:?}", heads[0].name, skins[0].name);
         }
+
+        // Vehicle skins (field 57): equip a Runner skin, self-verify, read back,
+        // touch nothing else.
+        let runner = &VEHICLE_FAMILIES[0];
+        let skins = vehicle_skins(runner.token);
+        assert!(!skins.is_empty(), "runner skins present");
+        let chosen = vec![skins[0].path.clone(), skins[1].path.clone()];
+        let mut veh = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        veh.set_vehicle_skins(runner.path, &chosen).expect("set vehicle skins");
+        let _ = veh.to_bytes().expect("vehicle edit must self-verify");
+        assert_eq!(veh.vehicle_family_skins(runner.path), chosen, "runner skins read back");
+        assert_eq!(veh.money(), save.money(), "vehicle edit must not touch money");
+        assert_eq!(veh.name(), save.name(), "vehicle edit must not touch name");
+        assert_eq!(vehicle_skin_name(&skins[0].path), Some(skins[0].name.as_str()));
+        eprintln!("golden: equipped Runner skins {:?}", skins[0].name);
 
         // Overpower level (virtual item in field 53): set 8, read back 8,
         // self-verify, and re-set to 10 (exercises the update-in-place path).

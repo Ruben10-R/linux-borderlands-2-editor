@@ -48,17 +48,19 @@ enum Tab {
     Currency,
     Items,
     FastTravel,
+    Vehicle,
     Raw,
     About,
 }
 
 impl Tab {
-    const ALL: [Tab; 7] = [
+    const ALL: [Tab; 8] = [
         Tab::Character,
         Tab::General,
         Tab::Currency,
         Tab::Items,
         Tab::FastTravel,
+        Tab::Vehicle,
         Tab::Raw,
         Tab::About,
     ];
@@ -69,6 +71,7 @@ impl Tab {
             Tab::Currency => "Currency",
             Tab::Items => "Items",
             Tab::FastTravel => "Fast Travel",
+            Tab::Vehicle => "Vehicle",
             Tab::Raw => "Raw",
             Tab::About => "About",
         }
@@ -88,6 +91,8 @@ struct Doc {
     /// Equipped head/skin paths (field 35 "wearing" indices 0 and 4).
     head: String,
     skin: String,
+    /// Equipped vehicle skins: (slot1, slot2) per family, in VEHICLE_FAMILIES order.
+    vehicle: Vec<(String, String)>,
     skill_points: i64,
     specialist_skill_points: i64,
     playthroughs_completed: i64,
@@ -246,6 +251,16 @@ impl App {
                     class_def: s.class_def().unwrap_or_default(),
                     head: s.wearing().first().cloned().unwrap_or_else(|| "0".into()),
                     skin: s.wearing().get(4).cloned().unwrap_or_else(|| "0".into()),
+                    vehicle: bl2_save::VEHICLE_FAMILIES
+                        .iter()
+                        .map(|f| {
+                            let sk = s.vehicle_family_skins(f.path);
+                            (
+                                sk.first().cloned().unwrap_or_default(),
+                                sk.get(1).cloned().unwrap_or_default(),
+                            )
+                        })
+                        .collect(),
                     skill_points: s.skill_points().unwrap_or(0),
                     specialist_skill_points: s.specialist_skill_points().unwrap_or(0),
                     playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
@@ -477,6 +492,15 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     {
         let _ = doc.save.set_wearing(&doc.head, &doc.skin);
     }
+    // Vehicle skins (field 57) — rewrite a family only if its selection changed.
+    for (i, fam) in bl2_save::VEHICLE_FAMILIES.iter().enumerate() {
+        let (s1, s2) = &doc.vehicle[i];
+        let want: Vec<String> =
+            [s1, s2].iter().filter(|s| !s.is_empty() && **s != "None").map(|s| s.to_string()).collect();
+        if doc.save.vehicle_family_skins(fam.path) != want {
+            let _ = doc.save.set_vehicle_skins(fam.path, &[s1.clone(), s2.clone()]);
+        }
+    }
     // Fast-travel stations — only rewrite field 16 if the set actually changed.
     let current: std::collections::HashSet<String> =
         doc.save.visited_stations().into_iter().collect();
@@ -685,6 +709,7 @@ impl eframe::App for App {
                         Tab::Currency => theme::coin(ui, 16.0),
                         Tab::Items => theme::crate_icon(ui, 16.0, col),
                         Tab::FastTravel => theme::signpost(ui, 16.0, col),
+                        Tab::Vehicle => theme::wheel(ui, 16.0, col),
                         Tab::Raw => theme::page(ui, 16.0, col),
                         Tab::About => theme::info(ui, 16.0, col),
                     }
@@ -717,6 +742,10 @@ impl eframe::App for App {
                 Tab::Items => items_tab(doc, ui, accent, text),
                 Tab::FastTravel => {
                     fast_travel_tab(doc, ui, accent);
+                    None
+                }
+                Tab::Vehicle => {
+                    vehicle_tab(doc, ui, accent);
                     None
                 }
                 Tab::Raw => {
@@ -1192,6 +1221,54 @@ fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     });
 }
 
+/// Vehicle tab: equip skins for each vehicle family (two loadout slots).
+fn vehicle_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    ui.horizontal(|ui| {
+        theme::wheel(ui, 20.0, accent);
+        ui.label(egui::RichText::new("Vehicle skins").color(accent).size(18.0).strong());
+    });
+    ui.add_space(4.0);
+    egui::Grid::new("vehicle").num_columns(3).spacing([16.0, 8.0]).striped(true).show(ui, |ui| {
+        ui.label("");
+        ui.weak("Slot 1");
+        ui.weak("Slot 2");
+        ui.end_row();
+        for (i, fam) in bl2_save::VEHICLE_FAMILIES.iter().enumerate() {
+            key(ui, fam.name, accent);
+            vehicle_skin_combo(ui, &format!("veh_{i}_1"), fam.token, &mut doc.vehicle[i].0);
+            vehicle_skin_combo(ui, &format!("veh_{i}_2"), fam.token, &mut doc.vehicle[i].1);
+            ui.end_row();
+        }
+    });
+    ui.add_space(6.0);
+    ui.weak(
+        "Two skin slots per vehicle; applies on Save/Download. To unlock every vehicle skin first, \
+         use the profile's \u{201c}Unlock all customizations\u{201d}.",
+    );
+}
+
+/// A vehicle-skin picker for one family + slot. Writes the chosen path (or "None").
+fn vehicle_skin_combo(ui: &mut egui::Ui, id_salt: &str, token: &str, current: &mut String) {
+    let display = if current.is_empty() || current == "None" {
+        "None".to_string()
+    } else {
+        bl2_save::vehicle_skin_name(current)
+            .map(str::to_string)
+            .unwrap_or_else(|| current.rsplit('.').next().unwrap_or(current).to_string())
+    };
+    egui::ComboBox::from_id_salt(id_salt).width(220.0).selected_text(display).show_ui(ui, |ui| {
+        let none = current.is_empty() || current == "None";
+        if ui.selectable_label(none, "None").clicked() {
+            *current = "None".to_string();
+        }
+        for sk in bl2_save::vehicle_skins(token) {
+            if ui.selectable_label(*current == sk.path, &sk.name).clicked() {
+                *current = sk.path.clone();
+            }
+        }
+    });
+}
+
 /// Items tab: backpack + bank list with per-item level + parts editing.
 fn items_tab(
     doc: &mut Doc,
@@ -1492,6 +1569,7 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
         "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
         "General — playthroughs, OP level, backpack/bank slots, save info",
         "Fast Travel — unlock stations (base game + DLC)",
+        "Vehicle — equip vehicle skins (Runner / Technical / Hovercraft / Fan Boat)",
         "Profile (drag profile.bin) — Golden Keys, Badass Rank, unlock all customizations",
     ] {
         ui.label(format!("   •  {s}"));

@@ -69,7 +69,8 @@ over your original (browsers can't write files directly).
 - **Currency** — money, eridium, seraph crystals, torgue tokens
 - **Items** — per-item level, part swapping, shareable **`BL2(…)` item codes** (export, and **batch import** — paste many codes separated by any of `, | \ /`), a built-in **code library** (browse thousands of weapon codes, filter by category, one-click add), backpack ↔ bank
 - **Fast Travel** — unlock stations (base game + DLC)
-- **Raw** — a named, searchable inspector; edit scalar fields directly (with hover help)
+- **Vehicle** — equip vehicle skins (Runner / Bandit Technical / Hovercraft / Fan Boat, two slots each)
+- **Raw** — a named, searchable inspector (**all 58 fields labelled**); edit scalar fields directly (with hover help)
 
 **Account profile (`profile.bin`)** — drag it into the app just like a save
 - **Golden Keys** (0–255)

@@ -206,6 +206,25 @@ pub fn head(ui: &mut egui::Ui, size: f32, color: Color32) {
     p.add(Shape::convex_polygon(shoulders, color, Stroke::new(size * 0.09, OUTLINE)));
 }
 
+/// A wheel glyph for the Vehicle tab.
+pub fn wheel(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let r = size * 0.44;
+    p.circle(c, r, color, Stroke::new(size * 0.10, OUTLINE));
+    p.circle(c, r * 0.34, OUTLINE, Stroke::new(size * 0.06, OUTLINE));
+    for i in 0..4 {
+        let a = std::f32::consts::FRAC_PI_2 * i as f32 + std::f32::consts::FRAC_PI_4;
+        p.line_segment(
+            [
+                Pos2::new(c.x + r * 0.34 * a.cos(), c.y + r * 0.34 * a.sin()),
+                Pos2::new(c.x + r * 0.9 * a.cos(), c.y + r * 0.9 * a.sin()),
+            ],
+            Stroke::new(size * 0.07, OUTLINE),
+        );
+    }
+}
+
 /// A flag-on-pole glyph for the General/progression tab.
 pub fn flag(ui: &mut egui::Ui, size: f32, color: Color32) {
     let (rect, p) = alloc(ui, size);
