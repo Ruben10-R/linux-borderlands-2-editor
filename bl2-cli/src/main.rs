@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bl2_save::{SaveError, SaveFile};
+use bl2_save::{Location, SaveError, SaveFile};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -17,6 +17,8 @@ struct Cli {
 enum Cmd {
     /// Show a character summary (class, level, xp, money, eridium).
     Info { sav: PathBuf },
+    /// List backpack + bank items and weapons (read-only).
+    Items { sav: PathBuf },
     /// Set money (dollars).
     SetMoney {
         sav: PathBuf,
@@ -71,6 +73,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), SaveError> {
     match Cli::parse().cmd {
         Cmd::Info { sav } => cmd_info(&sav),
+        Cmd::Items { sav } => cmd_items(&sav),
         Cmd::SetMoney { sav, amount, w } => {
             edit(&sav, w, "money", |s| s.money(), |s| s.set_money(amount))
         }
@@ -104,6 +107,47 @@ fn cmd_info(sav: &Path) -> Result<(), SaveError> {
     }
     println!("  money   : {}", s.money());
     println!("  eridium : {}", s.eridium());
+    Ok(())
+}
+
+fn cmd_items(sav: &Path) -> Result<(), SaveError> {
+    let s = SaveFile::load(sav)?;
+    let items = s.items()?;
+    println!("== items in {} ==", sav.display());
+    let (mut weapons, mut gear, mut placeholders) = (0u32, 0u32, 0u32);
+    for it in &items {
+        let ser = &it.serial;
+        if ser.is_placeholder() {
+            placeholders += 1;
+            continue;
+        }
+        let loc = match it.location {
+            Location::Backpack => "backpack",
+            Location::Bank => "bank",
+        };
+        let kind = if ser.is_weapon {
+            weapons += 1;
+            "weapon"
+        } else {
+            gear += 1;
+            "item"
+        };
+        let parts = ser.parts.iter().filter(|p| p.is_some()).count();
+        println!(
+            "  {loc:<8}  {kind:<6}  Lv {:<3}  type {}:{}  bal {}:{}  manu {}:{}  parts {parts}",
+            ser.stage.unwrap_or(0),
+            ser.item_type.lib, ser.item_type.asset,
+            ser.balance.lib, ser.balance.asset,
+            ser.manufacturer.lib, ser.manufacturer.asset,
+        );
+    }
+    println!("  ---");
+    print!("  {weapons} weapons, {gear} items");
+    if placeholders > 0 {
+        print!(", {placeholders} placeholder(s) skipped");
+    }
+    println!();
+    println!("  note: type/bal/manu are GameInfo db refs (lib:asset); human names need the GameInfo DB (future).");
     Ok(())
 }
 

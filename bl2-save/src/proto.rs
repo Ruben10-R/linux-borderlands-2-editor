@@ -95,6 +95,23 @@ pub fn parse_fields(buf: &[u8]) -> Result<Vec<Field>> {
     Ok(fields)
 }
 
+/// Content bytes of a length-delimited (wire type 2) field.
+pub(crate) fn wire2_content<'a>(buf: &'a [u8], f: &Field) -> Result<&'a [u8]> {
+    if f.wire_type != 2 {
+        return Err(SaveError::Proto("expected a length-delimited field".into()));
+    }
+    let mut p = f.val_start;
+    let len = read_varint(buf, &mut p)? as usize;
+    buf.get(p..p + len)
+        .ok_or_else(|| SaveError::Proto("length-delimited field runs past end".into()))
+}
+
+/// Read a varint value at a byte offset (the value of a wire-0 field).
+pub(crate) fn read_varint_value(buf: &[u8], start: usize) -> Option<i64> {
+    let mut p = start;
+    read_varint(buf, &mut p).ok().map(|v| v as i64)
+}
+
 /// Read the first varint field with the given number (e.g. level=2, xp=3).
 pub fn read_varint_field(buf: &[u8], fields: &[Field], number: u64) -> Option<i64> {
     let f = fields.iter().find(|f| f.number == number && f.wire_type == 0)?;

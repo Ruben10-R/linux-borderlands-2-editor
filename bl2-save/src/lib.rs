@@ -15,9 +15,13 @@
 
 mod codec;
 mod error;
+mod items;
 mod proto;
+mod serial;
 
 pub use error::{Result, SaveError};
+pub use items::{Item, Location};
+pub use serial::{ItemSerial, PartRef};
 
 use std::fs;
 use std::path::Path;
@@ -116,6 +120,11 @@ impl SaveFile {
     /// Eridium — `currency_on_hand[1]`.
     pub fn eridium(&self) -> i64 {
         self.currency().ok().and_then(|c| c.get(proto::IDX_ERIDIUM).copied()).unwrap_or(0)
+    }
+
+    /// All decoded backpack + bank items and weapons.
+    pub fn items(&self) -> Result<Vec<Item>> {
+        items::read_items(&self.proto)
     }
 
     // ---------- edits (each guarded so only the intended field changes) ----------
@@ -239,7 +248,7 @@ mod tests {
             .map(|i| ((i as u8).wrapping_mul(37)) ^ ((i >> 3) as u8))
             .collect();
         let comp = lzokay_native::compress(&outer).expect("lzokay compress");
-        let mut lzo = minilzo_rs::LZO::init().expect("minilzo init");
+        let lzo = minilzo_rs::LZO::init().expect("minilzo init");
         let back = lzo.decompress_safe(&comp, outer.len()).expect("C LZO decompress");
         assert_eq!(back, outer, "C LZO must decode lzokay output → the game will too");
     }
@@ -273,11 +282,29 @@ mod tests {
         // Decisive game-acceptance proxy: our (lzokay) re-encoded REAL save must be
         // decompressible by the C LZO the game uses, to a valid WSG buffer.
         let outer_size = u32::from_be_bytes(bytes[20..24].try_into().unwrap()) as usize;
-        let mut lzo = minilzo_rs::LZO::init().unwrap();
+        let lzo = minilzo_rs::LZO::init().unwrap();
         let outer = lzo
             .decompress_safe(&bytes[24..], outer_size)
             .expect("game's C LZO must decompress our real re-encoded save");
         assert_eq!(outer.len(), outer_size, "decompressed size must match header");
         assert_eq!(&outer[4..7], b"WSG", "decompressed buffer must be a WSG block");
+
+        // Every REAL item serial must decode AND re-encode byte-for-byte. The
+        // hand-crafted "virtual" placeholders (OP-level markers, set==255) are
+        // decoded but not normally packed, so they're excluded from the byte check.
+        let serials = items::raw_serials(&save.proto).expect("read serials");
+        let mut real = 0;
+        for (n, s) in serials.iter().enumerate() {
+            let decoded = serial::unwrap(s).unwrap_or_else(|e| panic!("serial #{n} decode: {e}"));
+            if decoded.is_placeholder() {
+                continue;
+            }
+            real += 1;
+            let re = serial::reencode(s).expect("reencode");
+            assert_eq!(&re, s, "real serial #{n} must round-trip byte-for-byte");
+        }
+        eprintln!("golden: {}/{} real serials round-tripped", real, serials.len());
+        // The typed list should decode without error too.
+        let _ = save.items().expect("items() should succeed");
     }
 }

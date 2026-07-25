@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use bl2_save::{SaveError, SaveFile};
+use bl2_save::{Location, SaveError, SaveFile};
 use eframe::egui;
 
 use crate::theme;
@@ -29,6 +29,40 @@ struct Doc {
     eridium: i64,
     level: i64,
     xp: i64,
+    items: Vec<ItemView>,
+}
+
+/// A read-only display row for one inventory item.
+struct ItemView {
+    location: &'static str,
+    is_weapon: bool,
+    level: i64,
+    refs: String,
+}
+
+fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
+    s.items()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|it| !it.serial.is_placeholder())
+        .map(|it| {
+            let ser = &it.serial;
+            ItemView {
+                location: match it.location {
+                    Location::Backpack => "backpack",
+                    Location::Bank => "bank",
+                },
+                is_weapon: ser.is_weapon,
+                level: ser.stage.unwrap_or(0),
+                refs: format!(
+                    "type {}:{}  bal {}:{}  manu {}:{}",
+                    ser.item_type.lib, ser.item_type.asset,
+                    ser.balance.lib, ser.balance.asset,
+                    ser.manufacturer.lib, ser.manufacturer.asset,
+                ),
+            }
+        })
+        .collect()
 }
 
 impl App {
@@ -47,6 +81,7 @@ impl App {
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
                     eridium: s.eridium(),
+                    items: build_item_views(&s),
                     name,
                     path,
                     save: s,
@@ -228,6 +263,40 @@ impl eframe::App for App {
                 ui.add_space(8.0);
                 let col = if *is_err { theme::DANGER } else { self.theme.accent() };
                 ui.colored_label(col, msg);
+            }
+
+            // Read-only item/weapon list.
+            if let Some(doc) = &self.doc {
+                if !doc.items.is_empty() {
+                    let accent = self.theme.accent();
+                    let text = self.theme.text();
+                    ui.add_space(10.0);
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new(format!("Items ({})", doc.items.len())).color(accent).strong(),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                            egui::Grid::new("items_grid")
+                                .num_columns(4)
+                                .spacing([16.0, 4.0])
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for v in &doc.items {
+                                        ui.label(v.location);
+                                        let (kcol, kind) =
+                                            if v.is_weapon { (accent, "weapon") } else { (text, "item") };
+                                        ui.label(egui::RichText::new(kind).color(kcol).strong());
+                                        ui.monospace(format!("Lv {}", v.level));
+                                        ui.monospace(&v.refs);
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                        ui.add_space(2.0);
+                        ui.weak("db refs (lib:asset) — human names need the GameInfo DB (future).");
+                    });
+                }
             }
         });
     }
