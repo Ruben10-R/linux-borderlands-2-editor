@@ -14,6 +14,7 @@ pub struct App {
     /// (is_error, message) shown under the fields.
     status: Option<(bool, String)>,
     theme: theme::Theme,
+    show_help: bool,
 }
 
 /// One loaded save: the parsed file plus editable scratch values.
@@ -251,8 +252,19 @@ impl eframe::App for App {
                 } else {
                     "💾  Save (with backup)"
                 };
-                if ui.button(egui::RichText::new(label).strong()).clicked() {
-                    self.save_current();
+                ui.horizontal(|ui| {
+                    if ui.button(egui::RichText::new(label).strong()).clicked() {
+                        self.save_current();
+                    }
+                    if cfg!(target_arch = "wasm32")
+                        && ui.button("ⓘ  How to install this save").clicked()
+                    {
+                        self.show_help = true;
+                    }
+                });
+                if cfg!(target_arch = "wasm32") {
+                    ui.add_space(2.0);
+                    ui.weak("Downloads a .sav — click \u{201c}How to install\u{201d} to put it in your game.");
                 }
             } else {
                 ui.add_space(8.0);
@@ -299,6 +311,50 @@ impl eframe::App for App {
                 }
             }
         });
+
+        // "How to install" modal — rendered above everything else.
+        if self.show_help {
+            let accent = self.theme.accent();
+            let mut close = false;
+            let resp = egui::Modal::new(egui::Id::new("install_help")).show(&ctx, |ui| {
+                install_help_ui(ui, accent, &mut close);
+            });
+            if close || resp.should_close() {
+                self.show_help = false;
+            }
+        }
+    }
+}
+
+/// Contents of the install-instructions modal.
+fn install_help_ui(ui: &mut egui::Ui, accent: egui::Color32, close: &mut bool) {
+    ui.set_max_width(480.0);
+    ui.label(egui::RichText::new("Installing your edited save").color(accent).size(20.0).strong());
+    ui.add_space(6.0);
+    ui.label("Your browser downloaded a .sav file. To use it in-game:");
+    ui.add_space(6.0);
+
+    let step = |ui: &mut egui::Ui, n: &str, s: &str| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(n).color(accent).strong());
+            ui.label(s);
+        });
+    };
+    step(ui, "1.", "Fully close Borderlands 2.");
+    step(ui, "2.", "Open your save folder:");
+    ui.indent("paths", |ui| {
+        ui.monospace("Linux (Steam):  ~/.local/share/aspyr-media/borderlands 2/");
+        ui.monospace("                willowgame/savedata/<SteamID>/");
+        ui.monospace("Windows:  …\\Documents\\My Games\\Borderlands 2\\WillowGame\\SaveData\\<SteamID>\\");
+    });
+    step(ui, "3.", "Back up the existing save there (copy it somewhere safe).");
+    step(ui, "4.", "Replace it with your download, keeping the same name (e.g. save0001.sav).");
+    step(ui, "5.", "Steam Cloud can overwrite it at launch. To be safe: quit Steam fully, replace the file, then start Steam again before launching — or turn off Steam Cloud for BL2 / go Offline.");
+    step(ui, "6.", "Launch BL2 and check your stats.");
+
+    ui.add_space(10.0);
+    if ui.button(egui::RichText::new("Got it").strong()).clicked() {
+        *close = true;
     }
 }
 
