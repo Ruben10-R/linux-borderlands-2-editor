@@ -114,6 +114,11 @@ struct Doc {
     part_catalog_key: Option<(bool, u32)>,
     /// Scratch input for the "add item from code" (BL2(...)) field.
     import_code: String,
+    /// Code-library browser state.
+    show_library: bool,
+    lib_filter: String,
+    lib_category: usize, // 0 = All, else index into library_categories()
+    lib_to_bank: bool,
     /// Items sub-tab: false = Backpack, true = Bank.
     show_bank: bool,
     /// Search filter for the Raw inspector.
@@ -262,6 +267,10 @@ impl App {
                     part_catalog: Vec::new(),
                     part_catalog_key: None,
                     import_code: String::new(),
+                    show_library: false,
+                    lib_filter: String::new(),
+                    lib_category: 0,
+                    lib_to_bank: false,
                     show_bank: false,
                     raw_filter: String::new(),
                     unlocked: s.visited_stations().into_iter().collect(),
@@ -727,6 +736,9 @@ impl eframe::App for App {
         // Parts picker modal — floats with full space; search keeps focus.
         self.parts_picker_modal(&ctx);
 
+        // Code library browser modal.
+        self.library_modal(&ctx);
+
         // "How to install" modal — rendered above everything else.
         if self.show_help {
             let accent = self.theme.accent();
@@ -803,6 +815,104 @@ impl App {
             doc.editing_part_slot = None;
         } else if close || resp.should_close() {
             doc.editing_part_slot = None;
+        }
+    }
+
+    /// The code-library browser: filter by category, search, add codes with one
+    /// click (virtualized list handles the thousands of entries).
+    fn library_modal(&mut self, ctx: &egui::Context) {
+        let Some(doc) = self.doc.as_mut() else { return };
+        if !doc.show_library {
+            return;
+        }
+        let accent = self.theme.accent();
+        let cats = bl2_save::library_categories();
+        let lib = bl2_save::code_library();
+        let needle = doc.lib_filter.to_lowercase();
+        let want_cat = if doc.lib_category == 0 { None } else { cats.get(doc.lib_category - 1).copied() };
+
+        // Indices of matching entries (recomputed each frame; a few thousand — cheap).
+        let matches: Vec<usize> = lib
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| want_cat.map_or(true, |c| e.category == c))
+            .filter(|(_, e)| {
+                needle.is_empty()
+                    || e.name.to_lowercase().contains(&needle)
+                    || e.family.to_lowercase().contains(&needle)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let mut close = false;
+        let mut add: Option<usize> = None;
+        let resp = egui::Modal::new(egui::Id::new("code_library")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.horizontal(|ui| {
+                theme::crate_icon(ui, 18.0, accent);
+                ui.label(egui::RichText::new("Item code library").color(accent).size(18.0).strong());
+                ui.weak(format!("{} codes", lib.len()));
+            });
+            // Category filter.
+            ui.horizontal_wrapped(|ui| {
+                if ui.selectable_label(doc.lib_category == 0, "All").clicked() {
+                    doc.lib_category = 0;
+                }
+                for (i, c) in cats.iter().enumerate() {
+                    if ui.selectable_label(doc.lib_category == i + 1, *c).clicked() {
+                        doc.lib_category = i + 1;
+                    }
+                }
+            });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label("Search:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut doc.lib_filter)
+                        .hint_text("name or family…")
+                        .desired_width(300.0),
+                );
+                ui.checkbox(&mut doc.lib_to_bank, "→ bank");
+                ui.weak(format!("{} shown", matches.len()));
+            });
+            ui.separator();
+
+            let row_h = ui.text_style_height(&egui::TextStyle::Body) + 8.0;
+            egui::ScrollArea::vertical().max_height(420.0).show_rows(ui, row_h, matches.len(), |ui, range| {
+                egui::Grid::new("lib_grid").num_columns(3).spacing([12.0, 4.0]).striped(true).show(ui, |ui| {
+                    for &mi in &matches[range] {
+                        let e = &lib[mi];
+                        if ui.small_button("Add").clicked() {
+                            add = Some(mi);
+                        }
+                        ui.monospace(&e.name).on_hover_text(format!("{}\nLv {}\n{}", e.family, e.level, e.code));
+                        ui.weak(&e.family);
+                        ui.end_row();
+                    }
+                });
+            });
+            ui.separator();
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+
+        let mut new_status = None;
+        if let Some(mi) = add {
+            let code = lib[mi].code.clone();
+            match doc.save.add_item_from_code(&code, doc.lib_to_bank) {
+                Ok(()) => {
+                    rebuild_items_preserving_levels(doc);
+                    let where_ = if doc.lib_to_bank { "bank" } else { "backpack" };
+                    new_status = Some((false, format!("Added {} to {where_}.", lib[mi].name)));
+                }
+                Err(e) => new_status = Some((true, format!("Add failed: {e}"))),
+            }
+        } else if close || resp.should_close() {
+            doc.show_library = false;
+        }
+        if let Some(s) = new_status {
+            self.status = Some(s);
         }
     }
 }
@@ -1093,6 +1203,9 @@ fn items_tab(
         }
         if found > 1 {
             ui.weak(format!("{found} codes"));
+        }
+        if ui.button("📚 Code library").on_hover_text("Browse a library of item codes to add").clicked() {
+            doc.show_library = true;
         }
         if let Some(to_bank) = do_import {
             let (ok, failed) = doc.save.add_items_from_codes(&doc.import_code, to_bank);

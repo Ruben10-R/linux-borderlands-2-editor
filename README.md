@@ -67,7 +67,7 @@ over your original (browsers can't write files directly).
 - **Character** — name, class, head & skin, level (+ XP *Sync*), XP, skill points, specialist points
 - **General** — playthroughs completed (unlock TVHM/UVHM), current playthrough, Overpower level, backpack/bank slots, save info
 - **Currency** — money, eridium, seraph crystals, torgue tokens
-- **Items** — per-item level, part swapping, shareable **`BL2(…)` item codes** (export, and **batch import** — paste many codes separated by any of `, | \ /`), backpack ↔ bank
+- **Items** — per-item level, part swapping, shareable **`BL2(…)` item codes** (export, and **batch import** — paste many codes separated by any of `, | \ /`), a built-in **code library** (browse thousands of weapon codes, filter by category, one-click add), backpack ↔ bank
 - **Fast Travel** — unlock stations (base game + DLC)
 - **Raw** — a named, searchable inspector; edit scalar fields directly (with hover help)
 
@@ -159,3 +159,9 @@ item/customization **identifier data** were understood from open-source projects
 apocalyptech's Python editor, and B2Profile — and **re-implemented cleanly** in
 Rust; no third-party code is copied. Borderlands 2 is a trademark of Gearbox/2K;
 this project is unaffiliated.
+
+The built-in **code library** contains community-shared `BL2(…)` codes (from a
+public Steam guide); each was **decoded by our own engine** to derive its
+category/level (the categorisation is ours, not scraped). Codes are shareable
+data, not game assets. Currently weapons only — the browser supports every
+category, so a broader code set drops straight in.

@@ -124,6 +124,11 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Decode a file of BL2(...) codes into a JSON library (category/name/level).
+    CodeIndex {
+        /// Text file containing BL2(...) codes (any separators).
+        file: PathBuf,
+    },
     /// Dump every top-level protobuf field (read-only inspector).
     Raw {
         sav: PathBuf,
@@ -302,6 +307,7 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetGoldenKeys { profile, count, w } => cmd_set_golden_keys(&profile, count, w),
         Cmd::SetBadassRank { profile, rank, w } => cmd_set_badass_rank(&profile, rank, w),
         Cmd::UnlockCustomizations { profile, lock, w } => cmd_unlock_customizations(&profile, !lock, w),
+        Cmd::CodeIndex { file } => cmd_code_index(&file),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
@@ -488,6 +494,35 @@ fn cmd_set_badass_rank(profile: &Path, rank: i32, w: WriteOpts) -> Result<(), Sa
         println!("  backup  : {}.bak", out.display());
     }
     warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_code_index(file: &Path) -> Result<(), SaveError> {
+    let text = std::fs::read_to_string(file)?;
+    let codes = bl2_save::extract_codes(&text);
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut ok = 0usize;
+    println!("[");
+    let mut first = true;
+    for code in &codes {
+        if let Some(info) = bl2_save::describe_code(code) {
+            if !first {
+                println!(",");
+            }
+            first = false;
+            print!(
+                "  {{\"code\":\"{}\",\"category\":\"{}\",\"name\":\"{}\",\"family\":\"{}\",\"level\":{}}}",
+                esc(code),
+                info.category,
+                esc(&info.name),
+                esc(&info.family),
+                info.level
+            );
+            ok += 1;
+        }
+    }
+    println!("\n]");
+    eprintln!("indexed {ok}/{} codes", codes.len());
     Ok(())
 }
 

@@ -18,6 +18,7 @@ mod codec;
 mod customizations;
 mod error;
 mod gameinfo;
+mod item_codes;
 mod items;
 mod levels;
 mod profile;
@@ -30,6 +31,7 @@ pub use profile::ProfileFile;
 
 pub use customizations::Customization;
 pub use error::{Result, SaveError};
+pub use item_codes::{code_library, library_categories, LibraryItem};
 pub use items::{Item, Location};
 pub use serial::{ItemSerial, PartRef};
 pub use stations::Station;
@@ -583,6 +585,50 @@ impl SaveFile {
     }
 }
 
+/// What a `BL2(...)` code decodes to, for building an item-code library.
+#[derive(Clone, Debug)]
+pub struct CodeInfo {
+    /// One of: "Weapon", "Shield", "Grenade", "Class Mod", "Relic", "Item".
+    pub category: &'static str,
+    /// Readable name (manufacturer + type, e.g. "Jakobs Sniper").
+    pub name: String,
+    /// The balance/family id — variants of the same item share it.
+    pub family: String,
+    /// Item level (game stage), 0 if none.
+    pub level: i64,
+}
+
+/// Decode a `BL2(...)` code into a [`CodeInfo`] (category + name), or None if it
+/// isn't a valid code. Uses the item serial + GameInfo — no save needed.
+pub fn describe_code(code: &str) -> Option<CodeInfo> {
+    let (serial, _) = serial::from_code(code).ok()?;
+    let s = serial::unwrap(&serial).ok()?;
+    let type_name = s.type_name().unwrap_or_default();
+    let category = if s.is_weapon {
+        "Weapon"
+    } else {
+        let hay = format!("{} {}", type_name, s.balance_name().unwrap_or_default()).to_lowercase();
+        if hay.contains("shield") {
+            "Shield"
+        } else if hay.contains("grenade") {
+            "Grenade"
+        } else if hay.contains("class") && hay.contains("mod") || hay.contains("classmod") {
+            "Class Mod"
+        } else if hay.contains("artifact") || hay.contains("relic") {
+            "Relic"
+        } else {
+            "Item"
+        }
+    };
+    let manu = s.manufacturer_name().unwrap_or_default();
+    let name = format!("{manu} {type_name}").trim().to_string();
+    let family = s
+        .balance_name()
+        .filter(|b| !b.is_empty())
+        .unwrap_or_else(|| if name.is_empty() { "Unknown".into() } else { name.clone() });
+    Some(CodeInfo { category, name, family, level: s.stage.unwrap_or(0) })
+}
+
 /// Pull every `BL2(...)` token out of free text. A code's base64 body can
 /// contain `/` and `+`, but never `)`, so scanning `BL2(` up to the next `)`
 /// robustly separates codes regardless of the separators between them.
@@ -747,6 +793,19 @@ mod tests {
         assert_eq!(s.money(), 608);
         assert_eq!(s.eridium(), 0);
         assert_eq!(s.class_name().as_deref(), Some("Zer0 (Assassin)"));
+    }
+
+    #[test]
+    fn code_library_loads_and_is_valid() {
+        let lib = code_library();
+        assert!(lib.len() > 1000, "library populated ({} entries)", lib.len());
+        // every entry is a real BL2(...) code and decodes
+        for e in lib.iter().take(50) {
+            assert!(e.code.starts_with("BL2(") && e.code.ends_with(')'));
+            assert!(describe_code(&e.code).is_some(), "entry decodes: {}", e.code);
+            assert!(!e.category.is_empty());
+        }
+        assert!(library_categories().contains(&"Weapon"));
     }
 
     #[test]
