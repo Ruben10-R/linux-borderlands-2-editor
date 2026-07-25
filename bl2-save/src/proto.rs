@@ -16,7 +16,11 @@ pub const FIELD_LEVEL: u64 = 2; // experience level (varint)
 pub const FIELD_XP: u64 = 3; // experience points (varint)
 pub const FIELD_SKILL_POINTS: u64 = 4; // available skill points (varint)
 pub const FIELD_CURRENCY: u64 = 6; // currency_on_hand (packed repeated int32)
+pub const FIELD_PLAYTHROUGHS_COMPLETED: u64 = 7; // playthroughs finished (varint)
 pub const FIELD_APPEARANCE: u64 = 19; // appearance message; sub-field 1 = name (string)
+pub const FIELD_SAVE_GAME_ID: u64 = 20; // save_game_id (varint)
+pub const FIELD_TIME_PLAYED: u64 = 25; // seconds played (varint)
+pub const FIELD_ACTIVE_PLAYTHROUGH: u64 = 49; // current playthrough 0/1/2 (varint)
 
 pub const IDX_MONEY: usize = 0;
 pub const IDX_ERIDIUM: usize = 1;

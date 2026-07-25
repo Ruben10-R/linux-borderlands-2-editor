@@ -149,6 +149,32 @@ impl SaveFile {
         proto::read_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS)
     }
 
+    /// Playthroughs completed (0–3). 1 = TVHM unlocked, 2 = UVHM unlocked.
+    pub fn playthroughs_completed(&self) -> Option<i64> {
+        let fields = self.fields().ok()?;
+        proto::read_varint_field(&self.proto, &fields, proto::FIELD_PLAYTHROUGHS_COMPLETED)
+    }
+
+    /// Current playthrough index (0 = Normal, 1 = TVHM, 2 = UVHM). Absent ⇒ 0.
+    pub fn active_playthrough(&self) -> i64 {
+        self.fields()
+            .ok()
+            .and_then(|fs| proto::read_varint_field(&self.proto, &fs, proto::FIELD_ACTIVE_PLAYTHROUGH))
+            .unwrap_or(0)
+    }
+
+    /// Save-game id (identifier, shown for reference).
+    pub fn save_game_id(&self) -> Option<i64> {
+        let fields = self.fields().ok()?;
+        proto::read_varint_field(&self.proto, &fields, proto::FIELD_SAVE_GAME_ID)
+    }
+
+    /// Total seconds of play time recorded on this save.
+    pub fn time_played(&self) -> Option<i64> {
+        let fields = self.fields().ok()?;
+        proto::read_varint_field(&self.proto, &fields, proto::FIELD_TIME_PLAYED)
+    }
+
     /// Raw class-definition asset path (e.g. "GD_Siren.Character.CharClass_Siren").
     pub fn class_def(&self) -> Option<String> {
         let fields = self.fields().ok()?;
@@ -285,6 +311,26 @@ impl SaveFile {
         let fields = self.fields()?;
         let new = proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_SKILL_POINTS, value);
         proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_SKILL_POINTS])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Set playthroughs completed (0–3). 1 unlocks TVHM, 2 unlocks UVHM.
+    pub fn set_playthroughs_completed(&mut self, value: i64) -> Result<()> {
+        let fields = self.fields()?;
+        let new =
+            proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_PLAYTHROUGHS_COMPLETED, value);
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_PLAYTHROUGHS_COMPLETED])?;
+        self.proto = new;
+        Ok(())
+    }
+
+    /// Set the current playthrough (0 = Normal, 1 = TVHM, 2 = UVHM). Added if absent.
+    pub fn set_active_playthrough(&mut self, value: i64) -> Result<()> {
+        let fields = self.fields()?;
+        let new =
+            proto::upsert_varint_field(&self.proto, &fields, proto::FIELD_ACTIVE_PLAYTHROUGH, value);
+        proto::only_fields_changed(&self.proto, &new, &[proto::FIELD_ACTIVE_PLAYTHROUGH])?;
         self.proto = new;
         Ok(())
     }
@@ -715,5 +761,23 @@ mod tests {
         // A known station resolves to its display name.
         assert_eq!(station_display_name("SouthernShelfTown"), Some("Southern Shelf"));
         eprintln!("golden: unlocked all {} stations", all.len());
+
+        // General/playthrough edits: playthroughs_completed (field 7, present) and
+        // active_playthrough (field 49, likely absent → appended). Guarded, self-verify.
+        let mut gen = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        gen.set_playthroughs_completed(2).expect("set playthroughs");
+        gen.set_active_playthrough(1).expect("set active playthrough");
+        let _ = gen.to_bytes().expect("general edits must self-verify");
+        assert_eq!(gen.playthroughs_completed(), Some(2));
+        assert_eq!(gen.active_playthrough(), 1);
+        assert_eq!(gen.money(), save.money(), "general edits must not touch money");
+        assert_eq!(gen.name(), save.name(), "general edits must not touch name");
+        assert_eq!(gen.level(), save.level(), "general edits must not touch level");
+        eprintln!(
+            "golden: playthroughs {:?} -> 2, active -> 1; save id {:?}, time {:?}s",
+            save.playthroughs_completed(),
+            save.save_game_id(),
+            save.time_played()
+        );
     }
 }

@@ -89,6 +89,20 @@ enum Cmd {
     Raw {
         sav: PathBuf,
     },
+    /// Set playthroughs completed (0-3): 1 unlocks TVHM, 2 unlocks UVHM.
+    SetPlaythroughs {
+        sav: PathBuf,
+        count: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Set the current playthrough (0=Normal, 1=TVHM, 2=UVHM).
+    SetPlaythrough {
+        sav: PathBuf,
+        index: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Unlock all fast-travel stations (base game + DLC).
     UnlockStations {
         sav: PathBuf,
@@ -173,6 +187,20 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
         Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
         Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
+        Cmd::SetPlaythroughs { sav, count, w } => edit(
+            &sav,
+            w,
+            "playthroughs completed",
+            |s| s.playthroughs_completed().unwrap_or(0),
+            |s| s.set_playthroughs_completed(count.clamp(0, 3)),
+        ),
+        Cmd::SetPlaythrough { sav, index, w } => edit(
+            &sav,
+            w,
+            "current playthrough",
+            |s| s.active_playthrough(),
+            |s| s.set_active_playthrough(index.clamp(0, 2)),
+        ),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),

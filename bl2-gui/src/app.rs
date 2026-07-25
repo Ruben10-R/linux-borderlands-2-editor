@@ -23,6 +23,7 @@ pub struct App {
 enum Tab {
     #[default]
     Character,
+    General,
     Currency,
     Items,
     FastTravel,
@@ -31,8 +32,9 @@ enum Tab {
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
+    const ALL: [Tab; 7] = [
         Tab::Character,
+        Tab::General,
         Tab::Currency,
         Tab::Items,
         Tab::FastTravel,
@@ -42,6 +44,7 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Character => "Character",
+            Tab::General => "General",
             Tab::Currency => "Currency",
             Tab::Items => "Items",
             Tab::FastTravel => "Fast Travel",
@@ -62,6 +65,8 @@ struct Doc {
     char_name: String,
     class_def: String,
     skill_points: i64,
+    playthroughs_completed: i64,
+    active_playthrough: i64,
     money: i64,
     eridium: i64,
     seraph: i64,
@@ -181,6 +186,8 @@ impl App {
                     char_name: s.name().unwrap_or_default(),
                     class_def: s.class_def().unwrap_or_default(),
                     skill_points: s.skill_points().unwrap_or(0),
+                    playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
+                    active_playthrough: s.active_playthrough(),
                     level: s.level().unwrap_or(0),
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
@@ -266,6 +273,8 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_level(doc.level.clamp(0, MAX))?;
     doc.save.set_xp(doc.xp.clamp(0, MAX))?;
     doc.save.set_skill_points(doc.skill_points.clamp(0, MAX))?;
+    doc.save.set_playthroughs_completed(doc.playthroughs_completed.clamp(0, 3))?;
+    doc.save.set_active_playthrough(doc.active_playthrough.clamp(0, 2))?;
     // Class + name are best-effort (a stray save might lack those fields).
     if !doc.class_def.is_empty() {
         let _ = doc.save.set_class(&doc.class_def);
@@ -396,11 +405,12 @@ impl eframe::App for App {
 
             // Tab bar (each tab gets an original glyph in its state colour).
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 for t in Tab::ALL {
                     let col = if self.tab == t { accent } else { text };
                     match t {
                         Tab::Character => theme::head(ui, 16.0, col),
+                        Tab::General => theme::flag(ui, 16.0, col),
                         Tab::Currency => theme::coin(ui, 16.0),
                         Tab::Items => theme::crate_icon(ui, 16.0, col),
                         Tab::FastTravel => theme::signpost(ui, 16.0, col),
@@ -423,6 +433,10 @@ impl eframe::App for App {
             let tab_status = match tab {
                 Tab::Character => {
                     character_tab(doc, ui, accent);
+                    None
+                }
+                Tab::General => {
+                    general_tab(doc, ui, accent);
                     None
                 }
                 Tab::Currency => {
@@ -567,6 +581,58 @@ fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     });
     ui.add_space(4.0);
     ui.weak("Changing class does not reset skills — level/skill mismatch may look odd in-game.");
+}
+
+/// General tab: playthrough progression + read-only save info.
+fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    const PT: [&str; 3] = ["Normal (NVHM)", "True Vault Hunter (TVHM)", "Ultimate Vault Hunter (UVHM)"];
+
+    ui.horizontal(|ui| {
+        theme::flag(ui, 20.0, accent);
+        ui.label(egui::RichText::new("Playthrough").color(accent).size(18.0).strong());
+    });
+    ui.add_space(4.0);
+
+    egui::Grid::new("general").num_columns(2).spacing([24.0, 8.0]).striped(true).show(ui, |ui| {
+        key(ui, "Playthroughs completed", accent);
+        ui.horizontal(|ui| {
+            edit_number(ui, &mut doc.playthroughs_completed, 1.0);
+            doc.playthroughs_completed = doc.playthroughs_completed.clamp(0, 3);
+            let hint = match doc.playthroughs_completed {
+                0 => "TVHM & UVHM locked",
+                1 => "TVHM unlocked",
+                _ => "TVHM & UVHM unlocked",
+            };
+            ui.weak(hint);
+        });
+        ui.end_row();
+
+        key(ui, "Current playthrough", accent);
+        let cur = *PT.get(doc.active_playthrough.clamp(0, 2) as usize).unwrap_or(&PT[0]);
+        egui::ComboBox::from_id_salt("playthrough_combo").selected_text(cur).show_ui(ui, |ui| {
+            for (i, name) in PT.iter().enumerate() {
+                if ui.selectable_label(doc.active_playthrough == i as i64, *name).clicked() {
+                    doc.active_playthrough = i as i64;
+                }
+            }
+        });
+        ui.end_row();
+
+        if let Some(id) = doc.save.save_game_id() {
+            field(ui, "Save ID", &id.to_string(), accent);
+        }
+        if let Some(secs) = doc.save.time_played() {
+            let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+            field(ui, "Time played", &format!("{h}h {m:02}m {s:02}s"), accent);
+        }
+    });
+
+    ui.add_space(6.0);
+    ui.colored_label(
+        theme::DANGER,
+        "⚠ Set \u{201c}playthroughs completed\u{201d} to unlock TVHM/UVHM. Changing the current \
+         playthrough switches the mode you load into — only do so if that mode is unlocked.",
+    );
 }
 
 /// Currency tab: money, eridium (seraph/torgue coming next slice).

@@ -206,6 +206,23 @@ pub fn head(ui: &mut egui::Ui, size: f32, color: Color32) {
     p.add(Shape::convex_polygon(shoulders, color, Stroke::new(size * 0.09, OUTLINE)));
 }
 
+/// A flag-on-pole glyph for the General/progression tab.
+pub fn flag(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let x = c.x - size * 0.22;
+    p.line_segment(
+        [Pos2::new(x, c.y - size * 0.40), Pos2::new(x, c.y + size * 0.44)],
+        Stroke::new(size * 0.10, OUTLINE),
+    );
+    let pennant = vec![
+        Pos2::new(x, c.y - size * 0.40),
+        Pos2::new(x + size * 0.46, c.y - size * 0.24),
+        Pos2::new(x, c.y - size * 0.08),
+    ];
+    p.add(Shape::convex_polygon(pennant, color, Stroke::new(size * 0.09, OUTLINE)));
+}
+
 /// A signpost glyph for the Fast Travel tab (post + arrow sign).
 pub fn signpost(ui: &mut egui::Ui, size: f32, color: Color32) {
     let (rect, p) = alloc(ui, size);
