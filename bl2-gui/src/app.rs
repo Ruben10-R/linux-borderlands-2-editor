@@ -879,7 +879,8 @@ impl App {
                         .hint_text("name or family…")
                         .desired_width(300.0),
                 );
-                ui.checkbox(&mut doc.lib_to_bank, "→ bank");
+                ui.checkbox(&mut doc.lib_to_bank, "add to bank")
+                    .on_hover_text("When ticked, \u{201c}Add\u{201d} puts the item in your Bank instead of your Backpack.");
                 ui.weak(format!("{} shown", matches.len()));
             });
             ui.separator();
