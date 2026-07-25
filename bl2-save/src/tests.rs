@@ -71,25 +71,29 @@ fn new_character_dlc_flags() {
 }
 
 /// Importing a group swaps in the source's fields (skills here) and the result
-/// still round-trips through the codec.
+/// still round-trips through the codec. Self-contained (no sample file): the
+/// source is a fresh character with two synthetic skill entries injected.
 #[test]
 fn import_group_copies_fields() {
-    let source = SaveFile::from_bytes(include_bytes!("../../samples/save0001.sav")).unwrap();
-    let src_skill_count = crate::proto::parse_fields(&source.proto)
-        .unwrap()
-        .iter()
-        .filter(|f| f.number == 8)
-        .count();
-    assert!(src_skill_count > 0, "sample should have skills");
+    let count8 = |s: &SaveFile| {
+        crate::proto::parse_fields(&s.proto)
+            .unwrap()
+            .iter()
+            .filter(|f| f.number == 8)
+            .count()
+    };
+
+    let mut source = SaveFile::new_character("GD_Assassin.Character.CharClass_Assassin", "Src");
+    // A new character has no skills (field 8); inject two so there's something
+    // for the Skills group to carry over.
+    crate::proto::emit_wire2_field(&mut source.proto, 8, b"skillA");
+    crate::proto::emit_wire2_field(&mut source.proto, 8, b"skillB");
+    assert_eq!(count8(&source), 2);
 
     let mut fresh = SaveFile::new_character("GD_Assassin.Character.CharClass_Assassin", "Zero");
+    assert_eq!(count8(&fresh), 0, "a fresh character has no skills");
     fresh.import_group(&source, ImportGroup::Skills).unwrap();
-    let got = crate::proto::parse_fields(&fresh.proto)
-        .unwrap()
-        .iter()
-        .filter(|f| f.number == 8)
-        .count();
-    assert_eq!(got, src_skill_count, "skills copied from source");
+    assert_eq!(count8(&fresh), 2, "skills copied from source");
     assert!(fresh.to_bytes().is_ok(), "still a valid save after import");
 }
 
