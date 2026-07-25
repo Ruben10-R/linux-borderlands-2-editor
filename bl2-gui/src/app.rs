@@ -426,14 +426,15 @@ impl eframe::App for App {
                          Click \u{201c}Parts\u{201d} to swap parts. Edited items unequip in-game — re-equip.",
                     );
 
-                    // Parts editor for the open item.
-                    if let Some((id, slot, lib, asset)) = parts_editor(doc, ui, accent) {
-                        let _ = doc.save.set_item_part(id, slot, lib, asset);
-                        doc.items = build_item_views(&doc.save);
-                    }
+                    // Parts editor for the open item (its slot list; the picker
+                    // itself is a modal rendered below).
+                    parts_editor(doc, ui, accent);
                 });
             }
         });
+
+        // Parts picker modal — floats with full space; search keeps focus.
+        self.parts_picker_modal(&ctx);
 
         // "How to install" modal — rendered above everything else.
         if self.show_help {
@@ -449,101 +450,110 @@ impl eframe::App for App {
     }
 }
 
-/// Parts editor for the currently-open item (`doc.editing_parts`). Returns a
-/// pending change `(item_id, slot, lib, asset)` when the user picks a new part.
-fn parts_editor(
-    doc: &mut Doc,
-    ui: &mut egui::Ui,
-    accent: egui::Color32,
-) -> Option<(usize, usize, u32, u32)> {
-    let id = doc.editing_parts?;
+impl App {
+    /// The floating part picker for the open (item, slot) — a search field + a
+    /// tall scrollable list. On pick, applies the swap and refreshes the list.
+    fn parts_picker_modal(&mut self, ctx: &egui::Context) {
+        let Some(doc) = self.doc.as_mut() else { return };
+        let (Some(id), Some(slot)) = (doc.editing_parts, doc.editing_part_slot) else {
+            return;
+        };
+        let Some(idx) = doc.items.iter().position(|v| v.id == id) else {
+            doc.editing_part_slot = None;
+            return;
+        };
+        let key = doc.items[idx].is_weapon_set;
+        if doc.part_catalog_key != Some(key) {
+            doc.part_catalog = bl2_save::parts_catalog(key.0, key.1);
+            doc.part_catalog_key = Some(key);
+        }
+        let cur = doc.items[idx]
+            .parts
+            .iter()
+            .find(|p| p.slot == slot)
+            .map(|p| (p.lib, p.asset));
+        let accent = self.theme.accent();
+
+        let mut pending: Option<(u32, u32)> = None;
+        let mut close = false;
+        let resp = egui::Modal::new(egui::Id::new("part_picker")).show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.label(egui::RichText::new(format!("Slot {slot} — choose a part")).color(accent).strong());
+            let te = ui.add(
+                egui::TextEdit::singleline(&mut doc.part_filter)
+                    .hint_text("type to search parts…")
+                    .desired_width(f32::INFINITY),
+            );
+            te.request_focus();
+            let needle = doc.part_filter.to_lowercase();
+            ui.separator();
+            egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                for opt in doc
+                    .part_catalog
+                    .iter()
+                    .filter(|o| needle.is_empty() || o.name.to_lowercase().contains(&needle))
+                {
+                    let selected = Some((opt.lib, opt.asset)) == cur;
+                    if ui.selectable_label(selected, &opt.name).clicked() {
+                        pending = Some((opt.lib, opt.asset));
+                    }
+                }
+            });
+            ui.separator();
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+
+        if let Some((lib, asset)) = pending {
+            let _ = doc.save.set_item_part(id, slot, lib, asset);
+            doc.items = build_item_views(&doc.save);
+            doc.editing_part_slot = None;
+        } else if close || resp.should_close() {
+            doc.editing_part_slot = None;
+        }
+    }
+}
+
+/// Render the open item's slot list. Each "change" opens the picker modal
+/// (rendered separately) for that slot. The actual swap happens in the modal.
+fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    let Some(id) = doc.editing_parts else { return };
     let Some(idx) = doc.items.iter().position(|v| v.id == id) else {
         doc.editing_parts = None;
-        return None;
+        return;
     };
-    // Cache the (large) catalog until the edited item's category/set changes.
-    let key = doc.items[idx].is_weapon_set;
-    if doc.part_catalog_key != Some(key) {
-        doc.part_catalog = bl2_save::parts_catalog(key.0, key.1);
-        doc.part_catalog_key = Some(key);
-    }
+    let item_name = doc.items[idx].name.clone();
+    let slots: Vec<(usize, String)> =
+        doc.items[idx].parts.iter().map(|p| (p.slot, p.name.clone())).collect();
 
     ui.add_space(6.0);
     ui.separator();
-    // Clone what the render loop needs so it doesn't hold a borrow on doc.items.
-    let item_name = doc.items[idx].name.clone();
-    let slots: Vec<(usize, u32, u32, String)> = doc.items[idx]
-        .parts
-        .iter()
-        .map(|p| (p.slot, p.lib, p.asset, p.name.clone()))
-        .collect();
-
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(format!("Parts — {item_name}")).color(accent).strong());
         if ui.button("Close").clicked() {
             doc.editing_parts = None;
+            doc.editing_part_slot = None;
         }
     });
     if doc.editing_parts.is_none() {
-        return None;
+        return;
     }
     ui.colored_label(
         theme::DANGER,
         "⚠ Changing parts can create items the game rejects — back up first and verify in-game.",
     );
-
-    let mut pending = None;
-    egui::ScrollArea::vertical()
-        .max_height(320.0)
-        .id_salt("parts_editor")
-        .show(ui, |ui| {
-            for (slot, lib, asset, name) in &slots {
-                let open = doc.editing_part_slot == Some(*slot);
-                ui.horizontal(|ui| {
-                    ui.monospace(format!("slot {slot:>2}"));
-                    ui.monospace(name);
-                    if ui.small_button(if open { "cancel" } else { "change" }).clicked() {
-                        if open {
-                            doc.editing_part_slot = None;
-                        } else {
-                            doc.editing_part_slot = Some(*slot);
-                            doc.part_filter.clear();
-                        }
-                    }
-                });
-
-                // Inline picker for the open slot — a normal search field + list
-                // (no ComboBox popup, so clicking the search never dismisses it).
-                if doc.editing_part_slot == Some(*slot) {
-                    ui.indent(("pick", *slot), |ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut doc.part_filter)
-                                .hint_text("type to search parts…")
-                                .desired_width(300.0),
-                        );
-                        let needle = doc.part_filter.to_lowercase();
-                        egui::ScrollArea::vertical()
-                            .max_height(200.0)
-                            .id_salt(("picklist", *slot))
-                            .show(ui, |ui| {
-                                for opt in doc.part_catalog.iter().filter(|o| {
-                                    needle.is_empty() || o.name.to_lowercase().contains(&needle)
-                                }) {
-                                    let selected = opt.lib == *lib && opt.asset == *asset;
-                                    if ui.selectable_label(selected, &opt.name).clicked() {
-                                        pending = Some((id, *slot, opt.lib, opt.asset));
-                                    }
-                                }
-                            });
-                    });
-                }
+    egui::Grid::new("parts_grid").num_columns(3).spacing([10.0, 4.0]).show(ui, |ui| {
+        for (slot, name) in &slots {
+            ui.monospace(format!("slot {slot:>2}"));
+            ui.monospace(name);
+            if ui.small_button("change").clicked() {
+                doc.editing_part_slot = Some(*slot);
+                doc.part_filter.clear();
             }
-        });
-    // A pick closes the slot's picker.
-    if pending.is_some() {
-        doc.editing_part_slot = None;
-    }
-    pending
+            ui.end_row();
+        }
+    });
 }
 
 /// Contents of the install-instructions modal.
