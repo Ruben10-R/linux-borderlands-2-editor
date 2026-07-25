@@ -1,5 +1,8 @@
-//! Entry points for the read-only save viewer: a native window, or a web/WASM
-//! canvas (served by `docker compose up`). Both construct the same `bl2_gui::App`.
+//! Entry points for the save editor: a native window, or a web/WASM canvas
+//! (served by `docker compose up`). Both construct the same `bl2_gui::App`.
+
+// On Windows release builds, don't open a console window behind the GUI.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 // ---- native ----
 /// Our original app icon: a gold hexagon (matches the in-app emblem) on

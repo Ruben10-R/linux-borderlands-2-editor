@@ -36,6 +36,15 @@ to choose a new location. No download/rewrite dance — it saves in place.
 > The native file dialogs use GTK; any Linux desktop already has the GTK 3
 > runtime (`libgtk-3-0`). The web build uses the browser's own file picker.
 
+### Windows app (`.exe`, cross-compiled from Linux)
+```bash
+./build-windows.sh       # → dist/bl2-editor.exe and dist/bl2edit.exe
+```
+Copy `dist/bl2-editor.exe` to a Windows PC and **double-click** it — it's a
+normal windowed app (native file dialogs, embedded icon, no console popup).
+`dist/bl2edit.exe` is the command-line tool. No Windows machine is needed to
+*build* them; the cross-compile runs in Docker on your Linux box.
+
 ### Web app (browser)
 ```bash
 docker compose up        # first run compiles; then open http://localhost:8080
