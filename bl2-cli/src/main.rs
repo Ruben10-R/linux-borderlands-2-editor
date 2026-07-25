@@ -115,6 +115,15 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Unlock (or --lock) every head/skin/vehicle-skin customization.
+    UnlockCustomizations {
+        profile: PathBuf,
+        /// Lock all instead of unlocking.
+        #[arg(long)]
+        lock: bool,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Dump every top-level protobuf field (read-only inspector).
     Raw {
         sav: PathBuf,
@@ -292,6 +301,7 @@ fn run() -> Result<(), SaveError> {
         Cmd::ProfileInfo { profile } => cmd_profile_info(&profile),
         Cmd::SetGoldenKeys { profile, count, w } => cmd_set_golden_keys(&profile, count, w),
         Cmd::SetBadassRank { profile, rank, w } => cmd_set_badass_rank(&profile, rank, w),
+        Cmd::UnlockCustomizations { profile, lock, w } => cmd_unlock_customizations(&profile, !lock, w),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
@@ -419,6 +429,29 @@ fn cmd_set_golden_keys(profile: &Path, count: u8, w: WriteOpts) -> Result<(), Sa
     println!("== set golden keys ==");
     println!("  input   : {}", profile.display());
     println!("  keys    : {before} -> {count}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    p.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_unlock_customizations(profile: &Path, unlock: bool, w: WriteOpts) -> Result<(), SaveError> {
+    let mut p = ProfileFile::load(profile)?;
+    p.set_all_customizations(unlock)?;
+    let out = w.out.as_deref().unwrap_or(profile);
+    let (u, total) = p.customization_stats().unwrap_or((0, 0));
+    println!("== {} customizations ==", if unlock { "unlock" } else { "lock" });
+    println!("  input   : {}", profile.display());
+    println!("  result  : {u} / {total} unlocked");
     if w.dry_run {
         println!("  dry-run : nothing written");
         return Ok(());

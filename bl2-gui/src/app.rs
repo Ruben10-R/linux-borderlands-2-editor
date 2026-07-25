@@ -28,9 +28,11 @@ struct ProfileDoc {
     path: Option<PathBuf>,
     /// Editable SHiFT Golden Keys (0–255).
     golden_keys: i64,
-    /// Read-only for now (writing needs token math — slice 2).
     badass_rank: i64,
     badass_tokens: i64,
+    /// Pending customization change to apply on save: Some(true)=unlock all,
+    /// Some(false)=lock all, None=leave as-is.
+    pending_customizations: Option<bool>,
 }
 
 /// Which editor tab is shown.
@@ -214,6 +216,7 @@ impl App {
                         golden_keys: p.golden_keys().unwrap_or(0) as i64,
                         badass_rank: p.badass_rank().unwrap_or(0) as i64,
                         badass_tokens: p.badass_tokens().unwrap_or(0) as i64,
+                        pending_customizations: None,
                         name,
                         path,
                         profile: p,
@@ -306,6 +309,12 @@ impl App {
             }
             if pdoc.badass_rank != pdoc.profile.badass_rank().unwrap_or(0) as i64 {
                 if let Err(e) = pdoc.profile.set_badass_rank(pdoc.badass_rank.clamp(0, MAX) as i32) {
+                    self.status = Some((true, format!("edit failed: {e}")));
+                    return;
+                }
+            }
+            if let Some(unlock) = pdoc.pending_customizations.take() {
+                if let Err(e) = pdoc.profile.set_all_customizations(unlock) {
                     self.status = Some((true, format!("edit failed: {e}")));
                     return;
                 }
@@ -719,9 +728,29 @@ fn profile_view(pdoc: &mut ProfileDoc, ui: &mut egui::Ui, accent: egui::Color32)
         key(ui, "Badass Tokens (unspent)", accent);
         ui.label(pdoc.badass_tokens.to_string());
         ui.end_row();
+
+        if let Some((unlocked, total)) = pdoc.profile.customization_stats() {
+            key(ui, "Customizations", accent);
+            ui.horizontal(|ui| {
+                theme::head(ui, 16.0, accent);
+                let shown = match pdoc.pending_customizations {
+                    Some(true) => format!("{total} / {total} (unlock all pending)"),
+                    Some(false) => format!("0 / {total} (lock all pending)"),
+                    None => format!("{unlocked} / {total} unlocked"),
+                };
+                ui.label(shown);
+                if ui.button("Unlock all").clicked() {
+                    pdoc.pending_customizations = Some(true);
+                }
+                if ui.button("Lock all").clicked() {
+                    pdoc.pending_customizations = Some(false);
+                }
+            });
+            ui.end_row();
+        }
     });
     ui.add_space(6.0);
-    ui.weak("Golden Keys and Badass Rank apply on Save/Download. Raising the rank grants the extra tokens to spend; customization unlocks are coming next.");
+    ui.weak("Changes apply on Save/Download. Raising Badass Rank grants the extra tokens to spend. \u{201c}Unlock all\u{201d} unlocks every head, skin and vehicle skin.");
     ui.add_space(2.0);
     ui.colored_label(
         theme::DANGER,
@@ -1221,6 +1250,7 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
         "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
         "General — playthroughs, OP level, backpack/bank slots, save info",
         "Fast Travel — unlock stations (base game + DLC)",
+        "Profile (drag profile.bin) — Golden Keys, Badass Rank, unlock all customizations",
     ] {
         ui.label(format!("   •  {s}"));
     }

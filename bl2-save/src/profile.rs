@@ -47,6 +47,7 @@ fn tokens_for_rank(rank: i64) -> i64 {
 }
 const ID_GOLDEN_KEYS: u32 = 162; // Binary: [{source u8, num u8, used u8}...]
 const GOLDEN_SOURCE_SHIFT: u8 = 0;
+const ID_CUSTOMIZATIONS: u32 = 300; // Binary: unlock bitmap (0xFF = unlocked)
 
 fn be32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
@@ -263,6 +264,35 @@ impl ProfileFile {
         e.value[4..].chunks_exact(3).find(|c| c[0] == GOLDEN_SOURCE_SHIFT).map(|c| c[1])
     }
 
+    /// (unlocked_bytes, total_bytes) of the customization-unlock blob, if present.
+    /// Every head/skin/vehicle-skin unlock lives here; 0xFF bytes are unlocked.
+    pub fn customization_stats(&self) -> Option<(usize, usize)> {
+        let e = self.entry(ID_CUSTOMIZATIONS)?;
+        if e.data_type != DT_BINARY || e.value.len() < 4 {
+            return None;
+        }
+        let data = &e.value[4..];
+        Some((data.iter().filter(|&&b| b == 0xFF).count(), data.len()))
+    }
+
+    /// Unlock (`true`) or lock (`false`) every customization — heads, skins and
+    /// vehicle skins — by filling the unlock blob. Mirrors Gibbed-style tools.
+    pub fn set_all_customizations(&mut self, unlocked: bool) -> Result<()> {
+        let fill = if unlocked { 0xFF } else { 0x00 };
+        let e = self
+            .entries
+            .iter_mut()
+            .find(|e| e.id == ID_CUSTOMIZATIONS && e.data_type == DT_BINARY)
+            .ok_or_else(|| SaveError::Proto("profile has no customizations entry".into()))?;
+        if e.value.len() < 4 {
+            return Err(SaveError::Proto("customizations entry malformed".into()));
+        }
+        for b in &mut e.value[4..] {
+            *b = fill;
+        }
+        Ok(())
+    }
+
     /// Set the SHiFT Golden Key count (0–255). Adds a SHiFT record if absent.
     pub fn set_golden_keys(&mut self, n: u8) -> Result<()> {
         let e = self
@@ -387,5 +417,16 @@ mod tests {
         assert_eq!(re.entries.len(), p.entries.len(), "entry count preserved");
         assert_eq!(re.badass_rank(), rank_before, "badass rank untouched");
         eprintln!("golden profile: set golden keys -> {:?}", re.golden_keys());
+
+        // Customizations unlock-all on the real profile, if it has the entry.
+        eprintln!("golden profile: customizations {:?}", p.customization_stats());
+        if p.customization_stats().is_some() {
+            p.set_all_customizations(true).expect("unlock all customizations");
+            let out2 = p.to_bytes().expect("customization self-verify");
+            let re2 = ProfileFile::from_bytes(&out2).unwrap();
+            let (unlocked, total) = re2.customization_stats().unwrap();
+            assert_eq!(unlocked, total, "all {total} customizations unlocked");
+            eprintln!("golden profile: unlocked all {total} customizations");
+        }
     }
 }
