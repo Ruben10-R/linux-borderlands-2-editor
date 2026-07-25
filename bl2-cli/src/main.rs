@@ -85,6 +85,21 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Print shareable BL2(...) codes for every item (Gibbed-compatible).
+    ExportCodes {
+        sav: PathBuf,
+    },
+    /// Import a BL2(...) item code as a new backpack (or bank) item.
+    ImportCode {
+        sav: PathBuf,
+        /// The BL2(...) code to import.
+        code: String,
+        /// Add to the bank instead of the backpack.
+        #[arg(long)]
+        bank: bool,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set every backpack + bank item and weapon to a level.
     SetItemLevels {
         sav: PathBuf,
@@ -148,6 +163,8 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
         Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
         Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
+        Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
+        Cmd::ImportCode { sav, code, bank, w } => cmd_import_code(&sav, &code, bank, w),
     }
 }
 
@@ -185,6 +202,44 @@ fn cmd_set_part(
         return Ok(());
     }
     let out = w.out.as_deref().unwrap_or(sav);
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_export_codes(sav: &Path) -> Result<(), SaveError> {
+    let s = SaveFile::load(sav)?;
+    let items = s.items()?;
+    eprintln!("== item codes in {} ==", sav.display());
+    let mut n = 0;
+    for it in &items {
+        if let Some(code) = s.item_code(it.id)? {
+            println!("{code}");
+            n += 1;
+        }
+    }
+    eprintln!("  {n} codes exported");
+    Ok(())
+}
+
+fn cmd_import_code(sav: &Path, code: &str, bank: bool, w: WriteOpts) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    let before = s.items()?.len();
+    s.add_item_from_code(code, bank)?;
+    let out = w.out.as_deref().unwrap_or(sav);
+    println!("== import code ==");
+    println!("  input   : {}", sav.display());
+    println!("  added   : 1 item into {} ({} -> {} entries)", if bank { "bank" } else { "backpack" }, before, before + 1);
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
     let backup = !w.no_backup;
     let did_backup = backup && out.exists();
     s.save(out, backup)?;

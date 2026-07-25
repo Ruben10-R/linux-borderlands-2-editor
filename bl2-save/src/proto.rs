@@ -117,6 +117,12 @@ pub(crate) fn emit_wire2_field(out: &mut Vec<u8>, number: u64, content: &[u8]) {
     out.extend_from_slice(content);
 }
 
+/// Append a wire-type-0 (varint) field to `out`.
+pub(crate) fn emit_varint_field(out: &mut Vec<u8>, number: u64, value: u64) {
+    encode_varint(out, number << 3);
+    encode_varint(out, value);
+}
+
 /// Rebuild a message with the first wire-2 field `number`'s content replaced,
 /// copying every other field byte-for-byte.
 pub(crate) fn replace_field_content(

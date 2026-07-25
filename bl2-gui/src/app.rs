@@ -66,6 +66,8 @@ struct Doc {
     part_catalog: Vec<bl2_save::PartOption>,
     /// (is_weapon, set) the cached catalog was built for.
     part_catalog_key: Option<(bool, u32)>,
+    /// Scratch input for the "add item from code" (BL2(...)) field.
+    import_code: String,
 }
 
 /// One inventory row: `level` is an editable scratch value applied on save.
@@ -173,6 +175,7 @@ impl App {
                     part_filter: String::new(),
                     part_catalog: Vec::new(),
                     part_catalog_key: None,
+                    import_code: String::new(),
                     name,
                     path,
                     save: s,
@@ -377,10 +380,19 @@ impl eframe::App for App {
             // Tab content.
             let tab = self.tab;
             let doc = self.doc.as_mut().unwrap();
-            match tab {
-                Tab::Character => character_tab(doc, ui, accent),
-                Tab::Currency => currency_tab(doc, ui, accent),
+            let tab_status = match tab {
+                Tab::Character => {
+                    character_tab(doc, ui, accent);
+                    None
+                }
+                Tab::Currency => {
+                    currency_tab(doc, ui, accent);
+                    None
+                }
                 Tab::Items => items_tab(doc, ui, accent, text),
+            };
+            if let Some(s) = tab_status {
+                self.status = Some(s);
             }
         });
 
@@ -535,10 +547,48 @@ fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
 }
 
 /// Items tab: backpack + bank list with per-item level + parts editing.
-fn items_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32, text: egui::Color32) {
+fn items_tab(
+    doc: &mut Doc,
+    ui: &mut egui::Ui,
+    accent: egui::Color32,
+    text: egui::Color32,
+) -> Option<(bool, String)> {
+    let mut status = None;
+
+    // Import: paste a BL2(...) code and drop a fresh copy into backpack or bank.
+    ui.horizontal(|ui| {
+        theme::crate_icon(ui, 14.0, accent);
+        ui.label("Add item from code:");
+        ui.add(
+            egui::TextEdit::singleline(&mut doc.import_code)
+                .hint_text("BL2(...)")
+                .desired_width(260.0),
+        );
+        let code = doc.import_code.trim().to_string();
+        let valid = code.starts_with("BL2(") && code.ends_with(')');
+        let mut do_import = None;
+        if ui.add_enabled(valid, egui::Button::new("→ Backpack")).clicked() {
+            do_import = Some(false);
+        }
+        if ui.add_enabled(valid, egui::Button::new("→ Bank")).clicked() {
+            do_import = Some(true);
+        }
+        if let Some(to_bank) = do_import {
+            status = Some(match doc.save.add_item_from_code(&code, to_bank) {
+                Ok(()) => {
+                    rebuild_items_preserving_levels(doc);
+                    doc.import_code.clear();
+                    (false, format!("Imported item into {}.", if to_bank { "bank" } else { "backpack" }))
+                }
+                Err(e) => (true, format!("Import failed: {e}")),
+            });
+        }
+    });
+    ui.add_space(4.0);
+
     if doc.items.is_empty() {
-        ui.weak("No items in backpack or bank.");
-        return;
+        ui.weak("No items in backpack or bank. Paste a BL2(...) code above to add one.");
+        return status;
     }
     // Convenience: set every levelable item to one level.
     ui.horizontal(|ui| {
@@ -559,9 +609,10 @@ fn items_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32, text: egui
     ui.add_space(4.0);
 
     let mut open_parts = None;
+    let mut copy_code = None;
     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
         egui::Grid::new("items_grid")
-            .num_columns(5)
+            .num_columns(6)
             .spacing([16.0, 4.0])
             .striped(true)
             .show(ui, |ui| {
@@ -585,6 +636,13 @@ fn items_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32, text: egui
                     if ui.small_button("Parts").clicked() {
                         open_parts = Some(v.id);
                     }
+                    if ui
+                        .small_button("Code")
+                        .on_hover_text("Copy this item's shareable BL2(...) code to the clipboard.")
+                        .clicked()
+                    {
+                        copy_code = Some(v.id);
+                    }
                     ui.end_row();
                 }
             });
@@ -594,12 +652,36 @@ fn items_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32, text: egui
         doc.editing_part_slot = None;
         doc.part_filter.clear();
     }
+    if let Some(id) = copy_code {
+        status = Some(match doc.save.item_code(id) {
+            Ok(Some(code)) => {
+                ui.ctx().copy_text(code.clone());
+                (false, format!("Copied code to clipboard: {code}"))
+            }
+            Ok(None) => (true, "Could not build a code for that item.".to_string()),
+            Err(e) => (true, format!("Code failed: {e}")),
+        });
+    }
     ui.add_space(2.0);
     ui.weak(
         "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
-         Click \u{201c}Parts\u{201d} to swap parts. Edited items unequip in-game — re-equip.",
+         \u{201c}Parts\u{201d} swaps parts; \u{201c}Code\u{201d} copies a shareable BL2(...) code. Edited items unequip in-game — re-equip.",
     );
     parts_editor(doc, ui, accent);
+    status
+}
+
+/// Rebuild the item views from the save after a structural change (e.g. import),
+/// preserving any unsaved per-item level scratch edits by id.
+fn rebuild_items_preserving_levels(doc: &mut Doc) {
+    let old: std::collections::HashMap<usize, i64> =
+        doc.items.iter().map(|v| (v.id, v.level)).collect();
+    doc.items = build_item_views(&doc.save);
+    for v in &mut doc.items {
+        if let Some(&lv) = old.get(&v.id) {
+            v.level = lv;
+        }
+    }
 }
 
 /// Render the open item's slot list. Each "change" opens the picker modal

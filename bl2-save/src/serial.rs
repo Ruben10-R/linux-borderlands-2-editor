@@ -271,6 +271,69 @@ pub(crate) fn with_part(serial: &[u8], slot: usize, part: PartRef) -> Result<Opt
     Ok(Some(wrap_raw(is_weapon, &values, key)))
 }
 
+// ---- shareable item codes: BL2(base64-of-serial-rekeyed-to-0) ----
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(B64[(n >> 18 & 63) as usize] as char);
+        out.push(B64[(n >> 12 & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { B64[(n >> 6 & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { B64[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut lut = [255u8; 256];
+    for (i, &c) in B64.iter().enumerate() {
+        lut[c as usize] = i as u8;
+    }
+    let mut out = Vec::new();
+    let (mut acc, mut nbits) = (0u32, 0u32);
+    for &c in s.as_bytes() {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        let v = lut[c as usize];
+        if v == 255 {
+            return None;
+        }
+        acc = (acc << 6) | v as u32;
+        nbits += 6;
+        if nbits >= 8 {
+            nbits -= 8;
+            out.push((acc >> nbits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// A shareable `BL2(...)` code for a serial (re-keyed to 0 so it's deterministic).
+pub(crate) fn to_code(serial: &[u8]) -> Result<String> {
+    let (is_weapon, values, _) = unwrap_raw(serial)?;
+    let rekeyed = wrap_raw(is_weapon, &values, 0);
+    Ok(format!("BL2({})", b64_encode(&rekeyed)))
+}
+
+/// Decode a `BL2(...)` code into a fresh serial (re-keyed) and whether it's a
+/// weapon. The key is derived from the code so distinct items get distinct seeds.
+pub(crate) fn from_code(code: &str) -> Result<(Vec<u8>, bool)> {
+    let inner = code
+        .trim()
+        .strip_prefix("BL2(")
+        .and_then(|s| s.strip_suffix(')'))
+        .ok_or_else(|| SaveError::Proto("not a BL2(...) item code".into()))?;
+    let raw = b64_decode(inner).ok_or_else(|| SaveError::Proto("bad base64 in item code".into()))?;
+    let (is_weapon, values, _) = unwrap_raw(&raw)?;
+    let key = crc32fast::hash(&raw) as i32;
+    Ok((wrap_raw(is_weapon, &values, key), is_weapon))
+}
+
 // ---- structured decode ----
 
 fn split(x: u64, bits: u32) -> PartRef {
@@ -305,6 +368,36 @@ pub fn unwrap(data: &[u8]) -> Result<ItemSerial> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_roundtrips_all_lengths() {
+        for len in 0..40usize {
+            let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37).wrapping_add(3)).collect();
+            let enc = b64_encode(&data);
+            assert_eq!(b64_decode(&enc).unwrap(), data, "len {len}");
+        }
+        assert!(b64_decode("****").is_none(), "invalid chars rejected");
+    }
+
+    #[test]
+    fn item_code_roundtrips_values() {
+        let values: Vec<Option<u64>> = vec![
+            Some(0), Some(0x1234), Some(0x2ABC), Some(0x055), Some(30), Some(30),
+            Some(0x101), Some(0x202), None, None, None, None, None, None, None, None, None,
+        ];
+        for is_weapon in [false, true] {
+            let serial = wrap_raw(is_weapon, &values, -0x2BADC0DE);
+            let code = to_code(&serial).unwrap();
+            assert!(code.starts_with("BL2(") && code.ends_with(')'));
+            let (reserial, w) = from_code(&code).unwrap();
+            assert_eq!(w, is_weapon);
+            // Re-keyed copy decodes to the same values (only the key differs).
+            let (_, v_orig, _) = unwrap_raw(&serial).unwrap();
+            let (_, v_copy, _) = unwrap_raw(&reserial).unwrap();
+            assert_eq!(v_copy, v_orig, "code preserves item values");
+        }
+        assert!(from_code("garbage").is_err(), "non-code rejected");
+    }
 
     #[test]
     fn raw_roundtrip_reproduces_serial() {

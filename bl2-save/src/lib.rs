@@ -281,6 +281,27 @@ impl SaveFile {
         self.proto = new;
         Ok(changed)
     }
+
+    /// A shareable `BL2(...)` item code for the item with [`Item::id`] `id`
+    /// (re-keyed to 0 so it's deterministic and matches Gibbed/apocalyptech).
+    /// Returns `None` if the id doesn't exist or its serial can't be decoded.
+    pub fn item_code(&self, id: usize) -> Result<Option<String>> {
+        match items::serial_by_id(&self.proto, id)? {
+            Some(serial) => Ok(Some(serial::to_code(&serial)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Import a `BL2(...)` item code as a new backpack (or bank) entry. The
+    /// serial is re-keyed so it's a fresh copy. Returns an error if the code
+    /// isn't a valid `BL2(...)` string.
+    pub fn add_item_from_code(&mut self, code: &str, to_bank: bool) -> Result<()> {
+        let (serial, is_weapon) = serial::from_code(code)?;
+        let new = items::add_item(&self.proto, &serial, is_weapon, to_bank);
+        proto::only_fields_changed(&self.proto, &new, &[41, 53, 54])?;
+        self.proto = new;
+        Ok(())
+    }
 }
 
 /// The six playable classes: (display name, class-definition asset path).
@@ -527,6 +548,26 @@ mod tests {
             assert_eq!(n.name().as_deref(), Some("Zer0edit"));
             assert_eq!(n.money(), save.money(), "name edit must not touch money");
             eprintln!("golden: renamed to {:?}", n.name());
+        }
+
+        // Item codes: export the first real item, re-import it, and the copy must
+        // decode to the same balance/kind (only its key differs). Count grows by 1.
+        if let Some(orig) = save.items().unwrap().into_iter().find(|it| !it.serial.is_placeholder())
+        {
+            let code = save.item_code(orig.id).unwrap().expect("code for real item");
+            assert!(code.starts_with("BL2(") && code.ends_with(')'), "code shape: {code}");
+
+            let mut imp = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+            let before = imp.items().unwrap().len();
+            imp.add_item_from_code(&code, false).expect("import code");
+            let _ = imp.to_bytes().expect("imported item must self-verify");
+            let after = imp.items().unwrap();
+            assert_eq!(after.len(), before + 1, "one item added");
+            let added = after.last().unwrap();
+            assert_eq!(added.serial.balance, orig.serial.balance, "same balance");
+            assert_eq!(added.serial.is_weapon, orig.serial.is_weapon, "same kind");
+            assert_eq!(imp.money(), save.money(), "import must not touch money");
+            eprintln!("golden: exported+reimported {} ({} chars)", code.len(), code.len());
         }
     }
 }

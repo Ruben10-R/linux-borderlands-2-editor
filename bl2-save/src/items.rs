@@ -179,6 +179,53 @@ pub fn set_item_part(
     Ok((out, changed))
 }
 
+/// The raw serial bytes of the item with [`Item::id`] `target`, if present.
+pub fn serial_by_id(protobuf: &[u8], target: usize) -> Result<Option<Vec<u8>>> {
+    let fields = proto::parse_fields(protobuf)?;
+    let mut id = 0usize;
+    for f in &fields {
+        if !matches!(f.number, 41 | 53 | 54) || f.wire_type != 2 {
+            continue;
+        }
+        let this_id = id;
+        id += 1;
+        if this_id != target {
+            continue;
+        }
+        let entry = proto::wire2_content(protobuf, f)?;
+        let ifields = proto::parse_fields(entry)?;
+        return match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
+            Some(sf) => Ok(Some(proto::wire2_content(entry, sf)?.to_vec())),
+            None => Ok(None),
+        };
+    }
+    Ok(None)
+}
+
+/// Append a new inventory entry carrying `serial` to the save, mirroring how
+/// Gibbed/apocalyptech build imported items: bank → field 41 (serial only),
+/// backpack weapon → field 54 `{1:serial, 2:0, 3:1}`, backpack item → field 53
+/// `{1:serial, 2:1, 3:0, 4:1}`. Returns the new protobuf.
+pub fn add_item(protobuf: &[u8], serial: &[u8], is_weapon: bool, to_bank: bool) -> Vec<u8> {
+    let mut entry = Vec::new();
+    proto::emit_wire2_field(&mut entry, 1, serial);
+    let field = if to_bank {
+        41
+    } else if is_weapon {
+        proto::emit_varint_field(&mut entry, 2, 0);
+        proto::emit_varint_field(&mut entry, 3, 1);
+        54
+    } else {
+        proto::emit_varint_field(&mut entry, 2, 1);
+        proto::emit_varint_field(&mut entry, 3, 0);
+        proto::emit_varint_field(&mut entry, 4, 1);
+        53
+    };
+    let mut out = protobuf.to_vec();
+    proto::emit_wire2_field(&mut out, field, &entry);
+    out
+}
+
 /// The raw serial blobs (for round-trip testing against a real save).
 #[cfg(test)]
 pub(crate) fn raw_serials(protobuf: &[u8]) -> Result<Vec<Vec<u8>>> {
