@@ -83,6 +83,8 @@ struct Doc {
     import_code: String,
     /// Items sub-tab: false = Backpack, true = Bank.
     show_bank: bool,
+    /// Scratch set of unlocked fast-travel station resource_names (field 16).
+    unlocked: std::collections::HashSet<String>,
 }
 
 /// One inventory row: `level` is an editable scratch value applied on save.
@@ -194,6 +196,7 @@ impl App {
                     part_catalog_key: None,
                     import_code: String::new(),
                     show_bank: false,
+                    unlocked: s.visited_stations().into_iter().collect(),
                     name,
                     path,
                     save: s,
@@ -269,6 +272,22 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     }
     if !doc.char_name.is_empty() {
         let _ = doc.save.set_name(&doc.char_name);
+    }
+    // Fast-travel stations — only rewrite field 16 if the set actually changed.
+    let current: std::collections::HashSet<String> =
+        doc.save.visited_stations().into_iter().collect();
+    if current != doc.unlocked {
+        let catalog = bl2_save::stations_catalog();
+        // Deterministic: catalog order for known stations, then preserve any
+        // unknown ones already on the save.
+        let mut list: Vec<String> =
+            catalog.iter().map(|s| s.rn.clone()).filter(|rn| doc.unlocked.contains(rn)).collect();
+        for extra in &doc.unlocked {
+            if !catalog.iter().any(|s| &s.rn == extra) {
+                list.push(extra.clone());
+            }
+        }
+        doc.save.set_visited_stations(&list)?;
     }
     Ok(())
 }
@@ -725,41 +744,63 @@ fn items_tab(
     status
 }
 
-/// Fast Travel tab: a read-only view of unlocked stations + the current one.
+/// Fast Travel tab: tick which stations are unlocked (base game + DLC), grouped
+/// by pack. Changes are scratch and written to field 16 on Save/Download.
 fn fast_travel_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
-    let stations = doc.save.visited_stations();
+    let catalog = bl2_save::stations_catalog();
     let last = doc.save.last_station();
 
     ui.horizontal(|ui| {
         theme::signpost(ui, 20.0, accent);
         ui.label(egui::RichText::new("Fast Travel").color(accent).size(18.0).strong());
     });
-    ui.add_space(4.0);
     if let Some(l) = &last {
+        let shown = bl2_save::station_display_name(l).unwrap_or(l);
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Current station:").color(accent));
-            ui.monospace(l);
+            ui.label(shown);
         });
     }
     ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(format!("Unlocked stations ({})", stations.len())).color(accent).strong(),
-    );
-    if stations.is_empty() {
-        ui.weak("None recorded on this save.");
-    } else {
-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-            for s in &stations {
-                let here = last.as_deref() == Some(s.as_str());
-                ui.monospace(if here { format!("★ {s}") } else { s.clone() });
+
+    ui.horizontal(|ui| {
+        if ui.button("Unlock all").clicked() {
+            for s in catalog {
+                doc.unlocked.insert(s.rn.clone());
             }
-        });
-    }
+        }
+        if ui.button("Lock all").clicked() {
+            for s in catalog {
+                doc.unlocked.remove(&s.rn);
+            }
+        }
+        let on = catalog.iter().filter(|s| doc.unlocked.contains(&s.rn)).count();
+        ui.label(egui::RichText::new(format!("{on} / {} unlocked", catalog.len())).color(accent));
+    });
+    ui.add_space(2.0);
+
+    egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+        let mut pack = "";
+        for s in catalog {
+            if s.pack != pack {
+                pack = &s.pack;
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(pack).color(accent).strong());
+            }
+            let mut on = doc.unlocked.contains(&s.rn);
+            let here = last.as_deref() == Some(s.rn.as_str());
+            let label = if here { format!("★ {}", s.name) } else { s.name.clone() };
+            if ui.checkbox(&mut on, label).changed() {
+                if on {
+                    doc.unlocked.insert(s.rn.clone());
+                } else {
+                    doc.unlocked.remove(&s.rn);
+                }
+            }
+        }
+    });
     ui.add_space(6.0);
-    ui.weak(
-        "Read-only for now. The game stores these as short names (e.g. \u{201c}SouthernShelfTown\u{201d}); \
-         unlocking every station cleanly needs a validated station-name dataset — a future addition.",
-    );
+    ui.weak("Tick stations to unlock them, then Save/Download. Station data extracted from Gibbed's GameInfo (identifier data only).");
 }
 
 /// Raw tab: a read-only dump of every top-level protobuf field.
@@ -811,7 +852,7 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
         "Character — name, class, level, XP, skill points",
         "Currency — money, eridium, seraph crystals, torgue tokens",
         "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
-        "Fast Travel — unlocked stations (read-only)",
+        "Fast Travel — unlock stations (base game + DLC)",
     ] {
         ui.label(format!("   •  {s}"));
     }

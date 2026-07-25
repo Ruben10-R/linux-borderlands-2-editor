@@ -89,6 +89,12 @@ enum Cmd {
     Raw {
         sav: PathBuf,
     },
+    /// Unlock all fast-travel stations (base game + DLC).
+    UnlockStations {
+        sav: PathBuf,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Print shareable BL2(...) codes for every item (Gibbed-compatible).
     ExportCodes {
         sav: PathBuf,
@@ -168,6 +174,7 @@ fn run() -> Result<(), SaveError> {
         Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
         Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
         Cmd::Raw { sav } => cmd_raw(&sav),
+        Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
         Cmd::ImportCode { sav, code, bank, w } => cmd_import_code(&sav, &code, bank, w),
     }
@@ -207,6 +214,30 @@ fn cmd_set_part(
         return Ok(());
     }
     let out = w.out.as_deref().unwrap_or(sav);
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_unlock_stations(sav: &Path, w: WriteOpts) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    let before = s.visited_stations().len();
+    let all: Vec<String> = bl2_save::stations_catalog().iter().map(|st| st.rn.clone()).collect();
+    s.set_visited_stations(&all)?;
+    let out = w.out.as_deref().unwrap_or(sav);
+    println!("== unlock stations ==");
+    println!("  input   : {}", sav.display());
+    println!("  stations: {before} -> {} unlocked", all.len());
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
     let backup = !w.no_backup;
     let did_backup = backup && out.exists();
     s.save(out, backup)?;

@@ -19,10 +19,12 @@ mod gameinfo;
 mod items;
 mod proto;
 mod serial;
+mod stations;
 
 pub use error::{Result, SaveError};
 pub use items::{Item, Location};
 pub use serial::{ItemSerial, PartRef};
+pub use stations::Station;
 
 use std::fs;
 use std::path::Path;
@@ -182,6 +184,16 @@ impl SaveFile {
         let f = fields.iter().find(|f| f.number == 17 && f.wire_type == 2)?;
         let c = proto::wire2_content(&self.proto, f).ok()?;
         std::str::from_utf8(c).ok().map(str::to_string)
+    }
+
+    /// Replace the unlocked fast-travel stations (field 16) with `resource_names`.
+    /// Pass values from [`stations_catalog`]'s `rn`. Only field 16 changes.
+    pub fn set_visited_stations(&mut self, resource_names: &[String]) -> Result<()> {
+        let fields = self.fields()?;
+        let new = proto::set_repeated_string_field(&self.proto, &fields, 16, resource_names);
+        proto::only_fields_changed(&self.proto, &new, &[16])?;
+        self.proto = new;
+        Ok(())
     }
 
     /// Full `currency_on_hand` array (index 0 = money, 1 = eridium, …).
@@ -389,6 +401,17 @@ pub struct PartOption {
     pub lib: u32,
     pub asset: u32,
     pub name: String,
+}
+
+/// Every known fast-travel station (base game + DLC), for building the unlock
+/// list. Each `Station`'s `rn` is what [`SaveFile::set_visited_stations`] expects.
+pub fn stations_catalog() -> &'static [Station] {
+    stations::catalog()
+}
+
+/// Display name for a stored station `resource_name`, if known.
+pub fn station_display_name(resource_name: &str) -> Option<&'static str> {
+    stations::display_name(resource_name)
 }
 
 /// Human name for part slot `slot` of a weapon or item.
@@ -678,5 +701,19 @@ mod tests {
         assert!(stations.iter().all(|s| !s.is_empty()), "station names non-empty");
         assert!(save.raw_fields().unwrap().iter().any(|f| f.number == 1), "raw lists field 1");
         eprintln!("golden: {} stations, last = {:?}", stations.len(), save.last_station());
+
+        // Unlock-all-stations: rewrite field 16 to the full catalog; must
+        // self-verify, touch nothing else, and read back the same set.
+        let all: Vec<String> = stations_catalog().iter().map(|s| s.rn.clone()).collect();
+        assert!(all.len() > 50, "station catalog populated");
+        let mut ft = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        ft.set_visited_stations(&all).expect("set stations");
+        let _ = ft.to_bytes().expect("station edit must self-verify");
+        assert_eq!(ft.visited_stations().len(), all.len(), "all stations unlocked");
+        assert_eq!(ft.money(), save.money(), "station edit must not touch money");
+        assert_eq!(ft.name(), save.name(), "station edit must not touch name");
+        // A known station resolves to its display name.
+        assert_eq!(station_display_name("SouthernShelfTown"), Some("Southern Shelf"));
+        eprintln!("golden: unlocked all {} stations", all.len());
     }
 }

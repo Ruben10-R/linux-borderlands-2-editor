@@ -123,6 +123,29 @@ pub(crate) fn emit_varint_field(out: &mut Vec<u8>, number: u64, value: u64) {
     encode_varint(out, value);
 }
 
+/// Replace every occurrence of the repeated string field `number` with `values`,
+/// copying all other fields verbatim in order (new values are appended at the
+/// end). Order among other fields is preserved, so `only_fields_changed` with
+/// `number` allowed will pass.
+pub(crate) fn set_repeated_string_field(
+    buf: &[u8],
+    fields: &[Field],
+    number: u64,
+    values: &[String],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(buf.len());
+    for f in fields {
+        if f.number == number {
+            continue;
+        }
+        out.extend_from_slice(&buf[f.tag_start..f.end]);
+    }
+    for v in values {
+        emit_wire2_field(&mut out, number, v.as_bytes());
+    }
+    out
+}
+
 /// Rebuild a message with the first wire-2 field `number`'s content replaced,
 /// copying every other field byte-for-byte.
 pub(crate) fn replace_field_content(
