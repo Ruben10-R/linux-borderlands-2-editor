@@ -38,6 +38,20 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Set seraph crystals.
+    SetSeraph {
+        sav: PathBuf,
+        amount: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Set torgue tokens.
+    SetTorgue {
+        sav: PathBuf,
+        amount: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set experience level (does not adjust xp or skill points).
     SetLevel {
         sav: PathBuf,
@@ -114,6 +128,12 @@ fn run() -> Result<(), SaveError> {
         }
         Cmd::SetEridium { sav, amount, w } => {
             edit(&sav, w, "eridium", |s| s.eridium(), |s| s.set_eridium(amount))
+        }
+        Cmd::SetSeraph { sav, amount, w } => {
+            edit(&sav, w, "seraph", |s| s.seraph(), |s| s.set_seraph(amount))
+        }
+        Cmd::SetTorgue { sav, amount, w } => {
+            edit(&sav, w, "torgue", |s| s.torgue(), |s| s.set_torgue(amount))
         }
         Cmd::SetLevel { sav, level, w } => edit(
             &sav,

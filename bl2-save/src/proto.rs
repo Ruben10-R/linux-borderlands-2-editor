@@ -18,6 +18,8 @@ pub const FIELD_CURRENCY: u64 = 6; // currency_on_hand (packed repeated int32)
 
 pub const IDX_MONEY: usize = 0;
 pub const IDX_ERIDIUM: usize = 1;
+pub const IDX_SERAPH: usize = 2;
+pub const IDX_TORGUE: usize = 4;
 
 #[derive(Clone, Copy)]
 pub struct Field {

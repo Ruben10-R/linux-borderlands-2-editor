@@ -123,6 +123,16 @@ impl SaveFile {
         self.currency().ok().and_then(|c| c.get(proto::IDX_ERIDIUM).copied()).unwrap_or(0)
     }
 
+    /// Seraph crystals — `currency_on_hand[2]`.
+    pub fn seraph(&self) -> i64 {
+        self.currency().ok().and_then(|c| c.get(proto::IDX_SERAPH).copied()).unwrap_or(0)
+    }
+
+    /// Torgue tokens — `currency_on_hand[4]`.
+    pub fn torgue(&self) -> i64 {
+        self.currency().ok().and_then(|c| c.get(proto::IDX_TORGUE).copied()).unwrap_or(0)
+    }
+
     /// All decoded backpack + bank items and weapons.
     pub fn items(&self) -> Result<Vec<Item>> {
         items::read_items(&self.proto)
@@ -151,6 +161,16 @@ impl SaveFile {
     /// Set eridium (`currency_on_hand[1]`).
     pub fn set_eridium(&mut self, value: i64) -> Result<()> {
         self.set_currency_index(proto::IDX_ERIDIUM, value)
+    }
+
+    /// Set seraph crystals (`currency_on_hand[2]`).
+    pub fn set_seraph(&mut self, value: i64) -> Result<()> {
+        self.set_currency_index(proto::IDX_SERAPH, value)
+    }
+
+    /// Set torgue tokens (`currency_on_hand[4]`).
+    pub fn set_torgue(&mut self, value: i64) -> Result<()> {
+        self.set_currency_index(proto::IDX_TORGUE, value)
     }
 
     fn set_varint(&mut self, number: u64, value: i64) -> Result<()> {
@@ -301,6 +321,16 @@ mod tests {
         let lzo = minilzo_rs::LZO::init().expect("minilzo init");
         let back = lzo.decompress_safe(&comp, outer.len()).expect("C LZO decompress");
         assert_eq!(back, outer, "C LZO must decode lzokay output → the game will too");
+    }
+
+    #[test]
+    fn currency_indices() {
+        let mut s = SaveFile { proto: synthetic_proto() };
+        s.set_money(1).unwrap();
+        s.set_eridium(2).unwrap();
+        s.set_seraph(3).unwrap();
+        s.set_torgue(4).unwrap(); // pads currency_on_hand out to index 4
+        assert_eq!((s.money(), s.eridium(), s.seraph(), s.torgue()), (1, 2, 3, 4));
     }
 
     #[test]

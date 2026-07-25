@@ -49,6 +49,8 @@ struct Doc {
     class: String,
     money: i64,
     eridium: i64,
+    seraph: i64,
+    torgue: i64,
     level: i64,
     xp: i64,
     items: Vec<ItemView>,
@@ -158,6 +160,8 @@ impl App {
                     xp: s.xp().unwrap_or(0),
                     money: s.money(),
                     eridium: s.eridium(),
+                    seraph: s.seraph(),
+                    torgue: s.torgue(),
                     items: build_item_views(&s),
                     item_level: s.level().unwrap_or(50).clamp(1, 127),
                     editing_parts: None,
@@ -229,6 +233,8 @@ impl App {
 fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_money(doc.money.clamp(0, MAX))?;
     doc.save.set_eridium(doc.eridium.clamp(0, MAX))?;
+    doc.save.set_seraph(doc.seraph.clamp(0, MAX))?;
+    doc.save.set_torgue(doc.torgue.clamp(0, MAX))?;
     doc.save.set_level(doc.level.clamp(0, MAX))?;
     doc.save.set_xp(doc.xp.clamp(0, MAX))?;
     Ok(())
@@ -471,6 +477,12 @@ fn currency_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
             theme::eridium(ui, 16.0);
             edit_number(ui, &mut doc.eridium, 1.0);
         });
+        ui.end_row();
+        key(ui, "Seraph Crystals", accent);
+        edit_number(ui, &mut doc.seraph, 1.0);
+        ui.end_row();
+        key(ui, "Torgue Tokens", accent);
+        edit_number(ui, &mut doc.torgue, 1.0);
         ui.end_row();
     });
 }
