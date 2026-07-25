@@ -803,7 +803,7 @@ pub(super) fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color
         return;
     };
     let v = &doc.items[idx];
-    let item_name = v.name.clone();
+    let item_name = v.display.clone();
     let is_weapon = v.is_weapon;
     let (kind, type_name, balance, manufacturer, level) = (
         if is_weapon { "Weapon" } else { "Item" },
