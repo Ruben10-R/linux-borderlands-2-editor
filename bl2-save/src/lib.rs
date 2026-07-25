@@ -112,6 +112,7 @@ impl SaveFile {
             let mut rf = RawField {
                 number: f.number,
                 name,
+                help: proto::field_help(f.number),
                 kind: "bytes",
                 count: occ.len(),
                 value: None,
@@ -556,6 +557,8 @@ pub struct RawField {
     pub number: u64,
     /// Human field name (from the save schema), or "" if unknown.
     pub name: &'static str,
+    /// Plain-language explanation of the field, or "" if undocumented.
+    pub help: &'static str,
     /// "varint", "string", "message", "collection", "bytes", "fixed32/64".
     pub kind: &'static str,
     /// Number of occurrences of this field number.

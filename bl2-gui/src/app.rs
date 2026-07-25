@@ -992,7 +992,15 @@ fn raw_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
                 {
                     continue;
                 }
-                ui.monospace(label).on_hover_text(format!("field #{}", f.number));
+                ui.horizontal(|ui| {
+                    ui.monospace(&label);
+                    let help = if f.help.is_empty() {
+                        format!("field #{} — not documented in our schema; purpose unknown, so editing may have unpredictable effects.", f.number)
+                    } else {
+                        format!("{}\n\n(field #{})", f.help, f.number)
+                    };
+                    ui.label(egui::RichText::new(" ?").color(accent).small()).on_hover_text(help);
+                });
                 ui.weak(f.kind);
                 if let Some(v) = f.value {
                     let mut v2 = v;

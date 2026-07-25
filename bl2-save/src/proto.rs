@@ -70,6 +70,48 @@ pub fn field_name(number: u64) -> &'static str {
     }
 }
 
+/// A plain-language explanation of a top-level field: what it is and what
+/// changing it does. "" for fields whose purpose we haven't documented.
+pub fn field_help(number: u64) -> &'static str {
+    match number {
+        1 => "The character's class (Vault Hunter). Change it in the Character tab.",
+        2 => "Character level (1–72). Use Sync to keep XP consistent with it.",
+        3 => "Total experience points. Use Sync to derive the right amount from the level.",
+        4 => "Unspent skill points for the main skill trees.",
+        5 => "Unspent specialist skill points (a second pool used by some mechanics).",
+        6 => "Money, Eridium, Seraph crystals and Torgue tokens — edit these in the Currency tab.",
+        7 => "Playthroughs completed (0–3): 1 unlocks TVHM, 2 unlocks UVHM.",
+        8 => "Your skill tree: which skills are picked and their points.",
+        11 => "Ammo pools and their SDU upgrade levels.",
+        13 => "Backpack/equipped inventory slot counts (driven by SDU upgrades).",
+        15 => "Challenge and statistics tracking (a large opaque blob).",
+        16 => "Fast-travel stations you've unlocked — edit in the Fast Travel tab.",
+        17 => "The fast-travel station you'll spawn at / last used.",
+        18 => "Per-playthrough mission progress and status.",
+        19 => "Character name and colour choices (name is on the Character tab).",
+        20 => "Internal id of this save slot. Rarely needs changing.",
+        21 => "Plot mission counter. Changing it can desync story progress.",
+        23 => "Unlock flags (opaque). Editing may have unpredictable effects.",
+        24 => "Unlock-notification flags (opaque).",
+        25 => "Total seconds played (shown in the General tab).",
+        26 => "When the save was last written (YYYYMMDDHHMMSS).",
+        29 => "Per-region enemy level scaling.",
+        30 => "Discovered areas / world-discovery entries.",
+        34 => "Unique save identifier (GUID). Leave alone unless you know why.",
+        35 => "Equipped head and skin — edit in the Character tab.",
+        36 => "Black Market (Eridium) upgrades purchased: ammo/backpack/bank capacity.",
+        37 => "The currently-tracked mission index.",
+        38 => "Challenge progress entries (Badass challenges).",
+        41 => "Items and weapons stored in your bank — edit in the Items tab.",
+        43 => "Raid-boss / area lockout timers.",
+        46 => "Areas whose map fog you've revealed.",
+        49 => "Current playthrough you load into: 0 = Normal, 1 = TVHM, 2 = UVHM.",
+        53 => "Non-weapon backpack items (shields, grenades, relics, class mods).",
+        54 => "Weapons in your backpack.",
+        _ => "",
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Field {
     pub number: u64,
