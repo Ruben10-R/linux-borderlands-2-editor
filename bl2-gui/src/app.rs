@@ -44,6 +44,8 @@ struct ItemView {
     levelable: bool,
     level: i64,
     name: String,
+    /// Balance + parts breakdown, shown on hover.
+    details: String,
 }
 
 fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
@@ -53,6 +55,15 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
         .filter(|it| !it.serial.is_placeholder())
         .map(|it| {
             let ser = &it.serial;
+            let balance = ser
+                .balance_name()
+                .unwrap_or_else(|| format!("bal {}:{}", ser.balance.lib, ser.balance.asset));
+            let mut details = format!("Balance: {balance}\nParts:");
+            for (i, part) in ser.part_names().iter().enumerate() {
+                if let Some(n) = part {
+                    details.push_str(&format!("\n  {i:>2}: {n}"));
+                }
+            }
             ItemView {
                 id: it.id,
                 location: match it.location {
@@ -69,6 +80,7 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
                     });
                     format!("{manu} {ty}").trim().to_string()
                 },
+                details,
             }
         })
         .collect()
@@ -350,7 +362,7 @@ impl eframe::App for App {
                                                 );
                                         });
                                     }
-                                    ui.monospace(&v.name);
+                                    ui.monospace(&v.name).on_hover_text(&v.details);
                                     ui.end_row();
                                 }
                             });
@@ -358,7 +370,7 @@ impl eframe::App for App {
                     ui.add_space(2.0);
                     ui.weak(
                         "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
-                         Edited items unequip in-game — re-equip. Names: manufacturer + type from GameInfo.",
+                         Edited items unequip in-game — re-equip. Hover an item for its balance + parts.",
                     );
                 });
             }

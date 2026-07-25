@@ -27,9 +27,10 @@ someone else's copyrighted work; this rule keeps us on the safe side regardless.
 
 ## Interoperability data (not art) — allowed
 
-We *do* ship a small slice of **factual identifier data** — GameInfo asset-path
-strings like `Manufacturers.Jakobs` — in `bl2-save/src/gameinfo_data.json`,
-extracted from the **zlib-licensed** Gibbed.Borderlands2.GameInfo. These are
+We *do* ship a slice of **factual identifier data** — GameInfo asset-path strings
+like `Manufacturers.Jakobs` (manufacturers, weapon/item types, balances, and
+parts) — in `bl2-save/src/gameinfo_data.json`, extracted from the **zlib-licensed**
+Gibbed.Borderlands2.GameInfo. These are
 format/identifier constants needed to turn item-serial numbers into readable
 names (every BL2 tool ships equivalents). They are **not** copyrighted artwork,
 audio, or game content — they're the interoperability data the file format

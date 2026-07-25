@@ -54,4 +54,13 @@ mod tests {
         assert!(name("Manufacturers", 0, 99, 99).is_none());
         assert!(name("Nonsense", 0, 0, 0).is_none());
     }
+
+    #[test]
+    fn balance_and_parts_categories_loaded() {
+        // Indices chosen to hit non-empty sublibraries (some sublibraries are
+        // empty placeholders, so not every (0,0,0) resolves).
+        assert!(name("BalanceDefs", 0, 0, 0).is_some());
+        assert!(name("ItemParts", 0, 0, 0).is_some());
+        assert!(name("WeaponParts", 0, 2, 0).is_some());
+    }
 }

@@ -18,7 +18,12 @@ enum Cmd {
     /// Show a character summary (class, level, xp, money, eridium).
     Info { sav: PathBuf },
     /// List backpack + bank items and weapons (read-only).
-    Items { sav: PathBuf },
+    Items {
+        sav: PathBuf,
+        /// Also list each item's resolved parts.
+        #[arg(long)]
+        parts: bool,
+    },
     /// Set money (dollars).
     SetMoney {
         sav: PathBuf,
@@ -84,7 +89,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), SaveError> {
     match Cli::parse().cmd {
         Cmd::Info { sav } => cmd_info(&sav),
-        Cmd::Items { sav } => cmd_items(&sav),
+        Cmd::Items { sav, parts } => cmd_items(&sav, parts),
         Cmd::SetMoney { sav, amount, w } => {
             edit(&sav, w, "money", |s| s.money(), |s| s.set_money(amount))
         }
@@ -144,7 +149,7 @@ fn cmd_info(sav: &Path) -> Result<(), SaveError> {
     Ok(())
 }
 
-fn cmd_items(sav: &Path) -> Result<(), SaveError> {
+fn cmd_items(sav: &Path, show_parts: bool) -> Result<(), SaveError> {
     let s = SaveFile::load(sav)?;
     let items = s.items()?;
     println!("== items in {} ==", sav.display());
@@ -172,12 +177,20 @@ fn cmd_items(sav: &Path) -> Result<(), SaveError> {
         let ty = ser
             .type_name()
             .unwrap_or_else(|| format!("type {}:{}", ser.item_type.lib, ser.item_type.asset));
-        let parts = ser.parts.iter().filter(|p| p.is_some()).count();
+        let balance = ser
+            .balance_name()
+            .unwrap_or_else(|| format!("bal {}:{}", ser.balance.lib, ser.balance.asset));
         println!(
-            "  {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  (bal {}:{}, {parts} parts)",
+            "  {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  {balance}",
             ser.stage.unwrap_or(0),
-            ser.balance.lib, ser.balance.asset,
         );
+        if show_parts {
+            for (i, part) in ser.part_names().iter().enumerate() {
+                if let Some(n) = part {
+                    println!("      part {i:>2}: {n}");
+                }
+            }
+        }
     }
     println!("  ---");
     print!("  {weapons} weapons, {gear} items");
@@ -185,7 +198,6 @@ fn cmd_items(sav: &Path) -> Result<(), SaveError> {
         print!(", {placeholders} placeholder(s) skipped");
     }
     println!();
-    println!("  note: manufacturer + type resolved from GameInfo; balance/part names are a future slice.");
     Ok(())
 }
 

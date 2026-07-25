@@ -67,6 +67,20 @@ impl ItemSerial {
         let category = if self.is_weapon { "WeaponTypes" } else { "ItemTypes" };
         crate::gameinfo::name(category, self.set, self.item_type.lib, self.item_type.asset)
     }
+
+    /// Balance-definition name (the item's base/family), if resolvable.
+    pub fn balance_name(&self) -> Option<String> {
+        crate::gameinfo::name("BalanceDefs", self.set, self.balance.lib, self.balance.asset)
+    }
+
+    /// Resolved name for each part slot (None where empty or unknown).
+    pub fn part_names(&self) -> Vec<Option<String>> {
+        let category = if self.is_weapon { "WeaponParts" } else { "ItemParts" };
+        self.parts
+            .iter()
+            .map(|p| p.and_then(|r| crate::gameinfo::name(category, self.set, r.lib, r.asset)))
+            .collect()
+    }
 }
 
 // ---- keystream / rotation (symmetric XOR; rotate_right ↔ rotate_left) ----
