@@ -181,6 +181,15 @@ impl SaveFile {
         self.proto = new;
         Ok(changed)
     }
+
+    /// Set one item (by its [`Item::id`]) to `level`. Returns whether it changed
+    /// (false if the id doesn't exist or the item is a protected no-level item).
+    pub fn set_item_level(&mut self, id: usize, level: i64) -> Result<bool> {
+        let (new, changed) = items::set_one_level(&self.proto, id, level)?;
+        proto::only_fields_changed(&self.proto, &new, &[41, 53, 54])?;
+        self.proto = new;
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -331,5 +340,19 @@ mod tests {
             }
         }
         eprintln!("golden: re-leveled {n} items to 50");
+
+        // Per-item leveling by id: changes iff the item is levelable; protected
+        // (grade-≤1) items stay locked. All levelable items end at 42.
+        let mut one = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+        for it in save.items().unwrap() {
+            let changed = one.set_item_level(it.id, 42).unwrap();
+            assert_eq!(changed, it.serial.is_levelable(), "id {}: changed vs levelable", it.id);
+        }
+        let _ = one.to_bytes().expect("per-item edits must self-verify");
+        for it in one.items().unwrap() {
+            if it.serial.is_levelable() {
+                assert_eq!(it.serial.stage, Some(42), "levelable item should be 42");
+            }
+        }
     }
 }

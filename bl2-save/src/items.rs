@@ -17,6 +17,9 @@ pub enum Location {
 /// One decoded inventory entry.
 #[derive(Clone, Debug)]
 pub struct Item {
+    /// Stable index of this entry among all item entries (walk order), used to
+    /// target a single item for editing. Independent of decode success.
+    pub id: usize,
     pub location: Location,
     pub serial: ItemSerial,
     pub quantity: Option<i64>,
@@ -27,6 +30,7 @@ pub struct Item {
 pub fn read_items(protobuf: &[u8]) -> Result<Vec<Item>> {
     let fields = proto::parse_fields(protobuf)?;
     let mut out = Vec::new();
+    let mut id = 0usize;
     for f in &fields {
         let location = match f.number {
             41 => Location::Bank,
@@ -36,6 +40,8 @@ pub fn read_items(protobuf: &[u8]) -> Result<Vec<Item>> {
         if f.wire_type != 2 {
             continue;
         }
+        let this_id = id;
+        id += 1; // every item entry gets an id, even if its serial won't decode
         let entry = proto::wire2_content(protobuf, f)?;
         let ifields = proto::parse_fields(entry)?;
         let Some(sf) = ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) else {
@@ -50,7 +56,7 @@ pub fn read_items(protobuf: &[u8]) -> Result<Vec<Item>> {
             .iter()
             .find(|x| x.number == 2 && x.wire_type == 0)
             .and_then(|q| proto::read_varint_value(entry, q.val_start));
-        out.push(Item { location, serial, quantity });
+        out.push(Item { id: this_id, location, serial, quantity });
     }
     Ok(out)
 }
@@ -83,6 +89,46 @@ pub fn relevel_all(protobuf: &[u8], level: i64, force: bool) -> Result<(Vec<u8>,
                 }
             }
             None => entry.to_vec(),
+        };
+        proto::emit_wire2_field(&mut out, f.number, &new_entry);
+    }
+    Ok((out, changed))
+}
+
+/// Set a single item (by its [`Item::id`]) to `level`, rebuilding the protobuf.
+/// Returns the new protobuf and whether it changed (false if the id doesn't
+/// exist or the item is a protected "no-level" item). Never levels grade-≤1.
+pub fn set_one_level(protobuf: &[u8], target: usize, level: i64) -> Result<(Vec<u8>, bool)> {
+    let fields = proto::parse_fields(protobuf)?;
+    let mut out = Vec::with_capacity(protobuf.len());
+    let mut id = 0usize;
+    let mut changed = false;
+    for f in &fields {
+        let is_item_field = matches!(f.number, 41 | 53 | 54) && f.wire_type == 2;
+        if !is_item_field {
+            out.extend_from_slice(&protobuf[f.tag_start..f.end]);
+            continue;
+        }
+        let this_id = id;
+        id += 1;
+        let entry = proto::wire2_content(protobuf, f)?;
+        let new_entry = if this_id == target {
+            let ifields = proto::parse_fields(entry)?;
+            match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
+                Some(sf) => {
+                    let serial = proto::wire2_content(entry, sf)?;
+                    match serial::releveled(serial, level, false)? {
+                        Some(new_serial) => {
+                            changed = true;
+                            proto::replace_field_content(entry, &ifields, 1, &new_serial)
+                        }
+                        None => entry.to_vec(),
+                    }
+                }
+                None => entry.to_vec(),
+            }
+        } else {
+            entry.to_vec()
         };
         proto::emit_wire2_field(&mut out, f.number, &new_entry);
     }

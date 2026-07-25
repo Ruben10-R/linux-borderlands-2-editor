@@ -31,16 +31,19 @@ struct Doc {
     level: i64,
     xp: i64,
     items: Vec<ItemView>,
+    /// Target for the "set all levelable items" convenience button.
     item_level: i64,
-    force_levels: bool,
 }
 
-/// A read-only display row for one inventory item.
+/// One inventory row: `level` is an editable scratch value applied on save.
 struct ItemView {
+    id: usize,
     location: &'static str,
     is_weapon: bool,
+    /// False for grade-≤1 "no-level" items — locked (leveling can break them).
+    levelable: bool,
     level: i64,
-    refs: String,
+    name: String,
 }
 
 fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
@@ -51,13 +54,15 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
         .map(|it| {
             let ser = &it.serial;
             ItemView {
+                id: it.id,
                 location: match it.location {
                     Location::Backpack => "backpack",
                     Location::Bank => "bank",
                 },
                 is_weapon: ser.is_weapon,
+                levelable: ser.is_levelable(),
                 level: ser.stage.unwrap_or(0),
-                refs: {
+                name: {
                     let manu = ser.manufacturer_name().unwrap_or_default();
                     let ty = ser.type_name().unwrap_or_else(|| {
                         format!("type {}:{}", ser.item_type.lib, ser.item_type.asset)
@@ -87,7 +92,6 @@ impl App {
                     eridium: s.eridium(),
                     items: build_item_views(&s),
                     item_level: s.level().unwrap_or(50).clamp(1, 127),
-                    force_levels: false,
                     name,
                     path,
                     save: s,
@@ -134,23 +138,17 @@ impl App {
             self.status = Some((true, format!("edit failed: {e}")));
             return;
         }
-        self.status = Some(persist(doc));
-    }
-
-    /// Set all items to the chosen level, refresh the list, report the count.
-    fn apply_item_levels(&mut self) {
-        let Some(doc) = self.doc.as_mut() else {
-            return;
-        };
-        let (lvl, force) = (doc.item_level.clamp(0, 127), doc.force_levels);
-        match doc.save.set_all_item_levels(lvl, force) {
-            Ok(n) => {
-                doc.items = build_item_views(&doc.save);
-                let verb = if cfg!(target_arch = "wasm32") { "Download" } else { "Save" };
-                self.status = Some((false, format!("Set {n} items to level {lvl}. Click {verb} to write.")));
-            }
-            Err(e) => self.status = Some((true, format!("item level edit failed: {e}"))),
+        // Apply per-item level edits (levelable rows only).
+        let edits: Vec<(usize, i64)> = doc
+            .items
+            .iter()
+            .filter(|v| v.levelable)
+            .map(|v| (v.id, v.level))
+            .collect();
+        for (id, lvl) in edits {
+            let _ = doc.save.set_item_level(id, lvl);
         }
+        self.status = Some(persist(doc));
     }
 }
 
@@ -287,33 +285,6 @@ impl eframe::App for App {
                     ui.add_space(2.0);
                     ui.weak("Downloads a .sav — click \u{201c}How to install\u{201d} to put it in your game.");
                 }
-
-                // Item-level editor.
-                if self.doc.as_ref().is_some_and(|d| !d.items.is_empty()) {
-                    ui.add_space(8.0);
-                    let mut apply = false;
-                    {
-                        let doc = self.doc.as_mut().unwrap();
-                        ui.horizontal(|ui| {
-                            ui.label("Set all items to level");
-                            ui.add(egui::DragValue::new(&mut doc.item_level).speed(1.0));
-                            doc.item_level = doc.item_level.clamp(0, 127);
-                            ui.checkbox(&mut doc.force_levels, "force")
-                                .on_hover_text("Also level 'no-level' items (some class mods/relics).");
-                            apply = ui.button("Apply").clicked();
-                        });
-                        if doc.force_levels {
-                            ui.colored_label(
-                                theme::DANGER,
-                                "⚠ force can invalidate special/no-level items (some grenades, starter gear) — the game may drop them.",
-                            );
-                        }
-                        ui.weak("Note: edited items get unequipped in-game (their serial changes) — just re-equip.");
-                    }
-                    if apply {
-                        self.apply_item_levels();
-                    }
-                }
             } else {
                 ui.add_space(8.0);
                 ui.weak("No save loaded yet.");
@@ -325,38 +296,71 @@ impl eframe::App for App {
                 ui.colored_label(col, msg);
             }
 
-            // Read-only item/weapon list.
-            if let Some(doc) = &self.doc {
-                if !doc.items.is_empty() {
-                    let accent = self.theme.accent();
-                    let text = self.theme.text();
-                    ui.add_space(10.0);
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(format!("Items ({})", doc.items.len())).color(accent).strong(),
-                    )
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                            egui::Grid::new("items_grid")
-                                .num_columns(4)
-                                .spacing([16.0, 4.0])
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    for v in &doc.items {
-                                        ui.label(v.location);
-                                        let (kcol, kind) =
-                                            if v.is_weapon { (accent, "weapon") } else { (text, "item") };
-                                        ui.label(egui::RichText::new(kind).color(kcol).strong());
-                                        ui.monospace(format!("Lv {}", v.level));
-                                        ui.monospace(&v.refs);
-                                        ui.end_row();
-                                    }
-                                });
-                        });
-                        ui.add_space(2.0);
-                        ui.weak("manufacturer + type from GameInfo; balance/part names coming later.");
+            // Editable item/weapon list (per-item leveling).
+            if self.doc.as_ref().is_some_and(|d| !d.items.is_empty()) {
+                let accent = self.theme.accent();
+                let text = self.theme.text();
+                ui.add_space(10.0);
+                let doc = self.doc.as_mut().unwrap();
+                let count = doc.items.len();
+                egui::CollapsingHeader::new(
+                    egui::RichText::new(format!("Items ({count})")).color(accent).strong(),
+                )
+                .default_open(true)
+                .show(ui, |ui| {
+                    // Convenience: set every levelable item to one level.
+                    ui.horizontal(|ui| {
+                        ui.label("Set all to level");
+                        ui.add(egui::DragValue::new(&mut doc.item_level).speed(1.0));
+                        doc.item_level = doc.item_level.clamp(1, 127);
+                        if ui
+                            .button("Apply to all")
+                            .on_hover_text("Sets every levelable item to this level. Locked ⚠ items are left alone.")
+                            .clicked()
+                        {
+                            let lvl = doc.item_level;
+                            for v in doc.items.iter_mut().filter(|v| v.levelable) {
+                                v.level = lvl;
+                            }
+                        }
                     });
-                }
+                    ui.add_space(4.0);
+
+                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                        egui::Grid::new("items_grid")
+                            .num_columns(4)
+                            .spacing([16.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for v in &mut doc.items {
+                                    ui.label(v.location);
+                                    let (kcol, kind) =
+                                        if v.is_weapon { (accent, "weapon") } else { (text, "item") };
+                                    ui.label(egui::RichText::new(kind).color(kcol).strong());
+                                    if v.levelable {
+                                        ui.add(egui::DragValue::new(&mut v.level).speed(1.0));
+                                        v.level = v.level.clamp(1, 127);
+                                    } else {
+                                        ui.horizontal(|ui| {
+                                            ui.monospace(format!("Lv {}", v.level));
+                                            ui.label(egui::RichText::new("⚠").color(theme::DANGER))
+                                                .on_hover_text(
+                                                    "No-level item (starter/special gear — some grenades, relics, class mods). \
+                                                     Leveling it can make the game drop it, so it's locked.",
+                                                );
+                                        });
+                                    }
+                                    ui.monospace(&v.name);
+                                    ui.end_row();
+                                }
+                            });
+                    });
+                    ui.add_space(2.0);
+                    ui.weak(
+                        "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
+                         Edited items unequip in-game — re-equip. Names: manufacturer + type from GameInfo.",
+                    );
+                });
             }
         });
 

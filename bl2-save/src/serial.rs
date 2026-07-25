@@ -50,6 +50,13 @@ impl ItemSerial {
         self.set == 255
     }
 
+    /// Whether this item is safe to level: a real item whose grade is > 1.
+    /// Grade-≤1 "no-level" items (some starter grenades/relics/class mods) can be
+    /// invalidated by leveling, so they're treated as locked.
+    pub fn is_levelable(&self) -> bool {
+        !self.is_placeholder() && self.grade.is_some_and(|g| g > 1)
+    }
+
     /// Manufacturer name (e.g. "Jakobs"), if resolvable from the GameInfo slice.
     pub fn manufacturer_name(&self) -> Option<String> {
         crate::gameinfo::name("Manufacturers", self.set, self.manufacturer.lib, self.manufacturer.asset)
