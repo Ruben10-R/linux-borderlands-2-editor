@@ -85,3 +85,28 @@ pub fn default_path(class_def: &str, is_head: bool) -> Option<String> {
     let kind = if is_head { "Head_Default" } else { "Skin_Default" };
     Some(format!("GD_DefaultCustoms_MainGame.{token}.{kind}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_tokens_map_correctly() {
+        assert_eq!(class_token("GD_Assassin.Character.CharClass_Assassin"), Some("Assassin"));
+        assert_eq!(class_token("GD_Siren.Character.CharClass_Siren"), Some("Siren"));
+        assert_eq!(class_token("GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"), Some("Psycho"));
+        assert_eq!(class_token("GD_Tulip_Mechromancer.Character.X"), Some("Mechromancer"));
+        assert!(class_token("nonsense").is_none());
+    }
+
+    #[test]
+    fn for_class_and_default() {
+        let heads = for_class("GD_Siren.Character.CharClass_Siren", true);
+        let skins = for_class("GD_Siren.Character.CharClass_Siren", false);
+        assert!(!heads.is_empty() && !skins.is_empty());
+        assert!(heads.iter().all(|c| c.is_head));
+        assert!(skins.iter().all(|c| !c.is_head));
+        assert!(name(&heads[0].path).is_some());
+        assert!(default_path("GD_Siren.Character.CharClass_Siren", true).unwrap().contains("Head_Default"));
+    }
+}

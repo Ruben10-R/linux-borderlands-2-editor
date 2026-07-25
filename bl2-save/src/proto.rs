@@ -530,3 +530,87 @@ pub fn only_fields_changed(old: &[u8], new: &[u8], allowed: &[u64]) -> Result<()
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn varint_roundtrips() {
+        for v in [0u64, 1, 127, 128, 300, 16_384, u32::MAX as u64, u64::MAX] {
+            let mut b = Vec::new();
+            encode_varint(&mut b, v);
+            let (dv, n) = decode_varint_at(&b, 0).expect("decode");
+            assert_eq!(dv, v);
+            assert_eq!(n, b.len());
+        }
+    }
+
+    #[test]
+    fn field_name_covers_all_58() {
+        for n in 1..=58u64 {
+            assert!(!field_name(n).is_empty(), "field {n} has no name");
+        }
+        assert_eq!(field_name(999), "");
+    }
+
+    #[test]
+    fn upsert_rewrites_present_and_appends_absent() {
+        let mut m = Vec::new();
+        emit_varint_field(&mut m, 2, 5);
+        emit_varint_field(&mut m, 9, 7);
+        let fs = parse_fields(&m).unwrap();
+
+        let m2 = upsert_varint_field(&m, &fs, 2, 42);
+        let fs2 = parse_fields(&m2).unwrap();
+        assert_eq!(read_varint_field(&m2, &fs2, 2), Some(42));
+        assert_eq!(read_varint_field(&m2, &fs2, 9), Some(7), "other field preserved");
+
+        let m3 = upsert_varint_field(&m, &fs, 3, 99);
+        let fs3 = parse_fields(&m3).unwrap();
+        assert_eq!(read_varint_field(&m3, &fs3, 3), Some(99), "absent field appended");
+    }
+
+    #[test]
+    fn repeated_string_field_replaces_all() {
+        let mut m = Vec::new();
+        emit_varint_field(&mut m, 2, 5);
+        emit_wire2_field(&mut m, 16, b"AAA");
+        emit_wire2_field(&mut m, 16, b"BBB");
+        let fs = parse_fields(&m).unwrap();
+        let vals = ["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let m2 = set_repeated_string_field(&m, &fs, 16, &vals);
+        only_fields_changed(&m, &m2, &[16]).expect("only field 16 changed");
+        let fs2 = parse_fields(&m2).unwrap();
+        let got: Vec<String> = fs2
+            .iter()
+            .filter(|f| f.number == 16 && f.wire_type == 2)
+            .map(|f| String::from_utf8(wire2_content(&m2, f).unwrap().to_vec()).unwrap())
+            .collect();
+        assert_eq!(got, vals);
+        assert_eq!(read_varint_field(&m2, &fs2, 2), Some(5), "field 2 untouched");
+    }
+
+    #[test]
+    fn only_fields_changed_detects_stray_edits() {
+        let mut a = Vec::new();
+        emit_varint_field(&mut a, 2, 5);
+        emit_varint_field(&mut a, 3, 7);
+        let mut b = Vec::new();
+        emit_varint_field(&mut b, 2, 5);
+        emit_varint_field(&mut b, 3, 8);
+        assert!(only_fields_changed(&a, &b, &[3]).is_ok());
+        assert!(only_fields_changed(&a, &b, &[2]).is_err(), "field 3 changed but not allowed");
+    }
+
+    #[test]
+    fn rewrite_string_field_edits_and_errors_when_absent() {
+        let mut m = Vec::new();
+        emit_wire2_field(&mut m, 1, b"old");
+        let fs = parse_fields(&m).unwrap();
+        let m2 = rewrite_string_field(&m, &fs, 1, "newer").unwrap();
+        let fs2 = parse_fields(&m2).unwrap();
+        assert_eq!(read_string_field(&m2, &fs2, 1).as_deref(), Some("newer"));
+        assert!(rewrite_string_field(&m, &fs, 99, "x").is_err());
+    }
+}

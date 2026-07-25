@@ -325,3 +325,34 @@ pub(crate) fn raw_serials(protobuf: &[u8]) -> Result<Vec<Vec<u8>>> {
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_item_then_read_it_back() {
+        // Take a real code from the library, add it to an empty backpack.
+        let code = &crate::code_library()[0].code;
+        let (serial, is_weapon) = crate::serial::from_code(code).unwrap();
+        let proto = add_item(&[], &serial, is_weapon, false);
+        let items = read_items(&proto).unwrap();
+        assert_eq!(items.len(), 1, "one item added");
+        let got = serial_by_id(&proto, 0).unwrap().expect("serial by id");
+        // re-decode: same weapon/item kind as the source code
+        assert_eq!(serial::unwrap(&got).unwrap().is_weapon, is_weapon);
+        assert!(serial_by_id(&proto, 9).unwrap().is_none(), "missing id -> None");
+    }
+
+    #[test]
+    fn op_level_virtual_item_roundtrips() {
+        // No OP data on an empty save; set 10 -> read 10; update in place to 7.
+        assert_eq!(read_op_level(&[]).unwrap(), None);
+        let p = set_op_level(&[], 10).unwrap();
+        assert_eq!(read_op_level(&p).unwrap(), Some(10));
+        let p2 = set_op_level(&p, 7).unwrap();
+        assert_eq!(read_op_level(&p2).unwrap(), Some(7));
+        // updating didn't append a second virtual item
+        assert_eq!(read_items(&p2).unwrap().len(), read_items(&p).unwrap().len());
+    }
+}

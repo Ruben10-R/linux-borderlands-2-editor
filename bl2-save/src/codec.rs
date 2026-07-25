@@ -322,3 +322,27 @@ pub fn encode(proto: &[u8]) -> Result<Vec<u8>> {
     file.extend_from_slice(&body);
     Ok(file)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_roundtrip_synthetic() {
+        // A small but valid protobuf: field 1 (wire2) = "abc", field 2 (varint) = 5.
+        let proto: Vec<u8> = vec![0x0a, 0x03, b'a', b'b', b'c', 0x10, 0x05];
+        let bytes = encode(&proto).expect("encode");
+        let dec = decode(&bytes).expect("decode");
+        assert!(dec.is_valid(), "sha1 + crc valid");
+        assert_eq!(dec.proto, proto, "round-trips to the same protobuf");
+    }
+
+    #[test]
+    fn decode_rejects_corrupt_sha1() {
+        let proto: Vec<u8> = vec![0x10, 0x2a];
+        let mut bytes = encode(&proto).unwrap();
+        bytes[0] ^= 0xFF; // flip a SHA1 byte
+        let dec = decode(&bytes).expect("still decodes structurally");
+        assert!(!dec.sha_ok, "sha mismatch detected");
+    }
+}

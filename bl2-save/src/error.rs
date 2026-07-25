@@ -37,3 +37,16 @@ pub enum SaveError {
 }
 
 pub type Result<T> = std::result::Result<T, SaveError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_display_helpfully() {
+        assert!(SaveError::TooShort(3).to_string().contains('3'));
+        assert!(SaveError::Proto("boom".into()).to_string().contains("boom"));
+        assert!(SaveError::Sha1Mismatch.to_string().to_lowercase().contains("sha1"));
+        assert!(SaveError::BadVersion(9).to_string().contains('9'));
+    }
+}

@@ -148,3 +148,19 @@ pub fn set_family_skins(protobuf: &[u8], family_path: &str, skins: &[String]) ->
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_family_has_skins_and_names_resolve() {
+        for f in FAMILIES {
+            let skins = skins_for(f.token);
+            assert!(!skins.is_empty(), "{} has skins", f.token);
+        }
+        let first = &skins_for("Runner")[0];
+        assert_eq!(skin_name(&first.path), Some(first.name.as_str()));
+        assert!(skin_name("not_a_skin").is_none());
+    }
+}

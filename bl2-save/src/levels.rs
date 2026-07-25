@@ -34,3 +34,19 @@ pub fn level_for_xp(xp: i64) -> i64 {
     }
     level
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xp_and_level_are_inverse() {
+        for lvl in 1..=80 {
+            assert_eq!(level_for_xp(xp_for_level(lvl)), lvl, "level {lvl}");
+        }
+        assert_eq!(xp_for_level(1), 0);
+        assert_eq!(level_for_xp(0), 1);
+        assert_eq!(level_for_xp(i64::MAX), 80);
+        assert_eq!(xp_for_level(999), xp_for_level(80), "clamped above 80");
+    }
+}

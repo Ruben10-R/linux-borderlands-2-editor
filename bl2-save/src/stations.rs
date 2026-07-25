@@ -44,3 +44,16 @@ pub fn catalog() -> &'static [Station] {
 pub fn display_name(resource_name: &str) -> Option<&'static str> {
     catalog().iter().find(|s| s.rn == resource_name).map(|s| s.name.as_str())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_and_display_names() {
+        assert!(catalog().len() > 50, "station catalog populated");
+        assert!(catalog().iter().all(|s| !s.rn.is_empty() && !s.name.is_empty()));
+        assert_eq!(display_name("SouthernShelfTown"), Some("Southern Shelf"));
+        assert!(display_name("no_such_station").is_none());
+    }
+}

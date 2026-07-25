@@ -1575,10 +1575,26 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
         ui.label(format!("   •  {s}"));
     }
     ui.add_space(8.0);
+    head(ui, "Credits");
+    ui.label(
+        "The Borderlands 2 save/profile formats and item/game data were figured out by the \
+         community. This tool reimplements them in Rust — a native Linux app that also builds for \
+         Windows and the web. Huge thanks to:",
+    );
+    for c in [
+        "Gibbed (rick) — Gibbed.Borderlands2 save editor & GameInfo data (zlib licence)",
+        "apocalyptech — Python BL2 editor (cross-checked the save format & fields)",
+        "withmorten (B2Profile) — the profile.bin format",
+        "Community code lists — the built-in item-code library",
+    ] {
+        ui.label(format!("   •  {c}"));
+    }
+    ui.add_space(8.0);
     head(ui, "Art & data");
     ui.label(
         "Every icon and theme is original art drawn in code — no Gearbox/2K assets are bundled. \
-         Item and part names come from open identifier data (zlib-licensed).",
+         Item/part names are open identifier data. No third-party code is copied; formats and \
+         field IDs are facts, reimplemented cleanly. Borderlands 2 © Gearbox/2K; unaffiliated.",
     );
     ui.add_space(10.0);
     ui.colored_label(theme::DANGER, "⚠ Always back up your save before editing.");

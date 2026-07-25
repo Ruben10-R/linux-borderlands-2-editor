@@ -107,3 +107,40 @@ pub fn set_bank_size(protobuf: &[u8], slots: i64) -> Result<Vec<u8>> {
     let _ = fields;
     set_black_market_sdu(&out, BANK_SDU_IDX, sdu as u64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synthetic() -> Vec<u8> {
+        // field 13 { sub1 = 12 }, field 36 = 8 packed varint zeros, field 56 = 6
+        let mut sizes = Vec::new();
+        proto::emit_varint_field(&mut sizes, 1, 12);
+        let mut m = Vec::new();
+        proto::emit_wire2_field(&mut m, FIELD_SIZES, &sizes);
+        proto::emit_wire2_field(&mut m, FIELD_BLACK_MARKET, &vec![0u8; 9]);
+        proto::emit_varint_field(&mut m, FIELD_BANK_SIZE, 6);
+        m
+    }
+
+    #[test]
+    fn backpack_snaps_to_sdu_grid() {
+        let m = synthetic();
+        assert_eq!(backpack_size(&m), Some(12));
+        let m2 = set_backpack_size(&m, 39).unwrap();
+        assert_eq!(backpack_size(&m2), Some(39)); // 12 + 3*9
+        // a non-grid request snaps up to the next SDU
+        let m3 = set_backpack_size(&m, 20).unwrap();
+        assert_eq!(backpack_size(&m3), Some(21)); // 12 + 3*3
+    }
+
+    #[test]
+    fn bank_snaps_to_sdu_grid() {
+        let m = synthetic();
+        assert_eq!(bank_size(&m), 6);
+        let m2 = set_bank_size(&m, 24).unwrap();
+        assert_eq!(bank_size(&m2), 24); // 6 + 2*9
+        let m3 = set_bank_size(&m, 21).unwrap();
+        assert_eq!(bank_size(&m3), 22); // 6 + 2*8
+    }
+}
