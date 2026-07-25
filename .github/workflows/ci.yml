@@ -13,7 +13,7 @@ jobs:
     name: fmt · clippy · test · web build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust (stable) + rustfmt/clippy/wasm
         uses: dtolnay/rust-toolchain@stable

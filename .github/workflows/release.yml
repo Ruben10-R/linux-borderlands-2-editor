@@ -17,7 +17,7 @@ jobs:
     name: Linux (x86_64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -40,7 +40,7 @@ jobs:
           chmod +x out/bl2-editor out/bl2edit
           tar -czf bl2edit-linux-x86_64.tar.gz -C out bl2-editor bl2edit
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: bl2edit-linux-x86_64.tar.gz
@@ -49,7 +49,7 @@ jobs:
     name: Windows (x86_64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -64,7 +64,7 @@ jobs:
           Copy-Item target/release/bl2edit.exe out/bl2edit.exe
           Compress-Archive -Path out/* -DestinationPath bl2edit-windows-x86_64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: bl2edit-windows-x86_64.zip
@@ -73,7 +73,7 @@ jobs:
     name: Web (WASM)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -92,7 +92,7 @@ jobs:
       - name: Package
         run: tar -czf bl2edit-web.tar.gz -C /tmp/bl2-gui-dist .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web
           path: bl2edit-web.tar.gz
@@ -105,12 +105,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
       - name: Publish release with binaries
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*
           generate_release_notes: true
