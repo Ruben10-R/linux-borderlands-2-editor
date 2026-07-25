@@ -256,6 +256,21 @@ pub(crate) fn releveled(serial: &[u8], level: i64, force: bool) -> Result<Option
     }
 }
 
+/// Set part `slot` (0-based, into the 11 part slots) to `part`, but only if that
+/// slot is currently present. Returns the new serial, or None if the slot is
+/// empty/out of range — we don't create or clear part slots (that changes the
+/// serial length and risks corruption), only swap an existing part.
+pub(crate) fn with_part(serial: &[u8], slot: usize, part: PartRef) -> Result<Option<Vec<u8>>> {
+    let (is_weapon, mut values, key) = unwrap_raw(serial)?;
+    let idx = 6 + slot; // parts start after set/type/balance/manufacturer/grade/stage
+    if idx >= values.len() || values[idx].is_none() {
+        return Ok(None);
+    }
+    let bits = 10 + is_weapon as u32; // WeaponParts asset_bits=11, ItemParts=10
+    values[idx] = Some(((part.lib as u64) << bits) | (part.asset as u64));
+    Ok(Some(wrap_raw(is_weapon, &values, key)))
+}
+
 // ---- structured decode ----
 
 fn split(x: u64, bits: u32) -> PartRef {

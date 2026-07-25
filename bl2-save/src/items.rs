@@ -6,7 +6,7 @@
 
 use crate::error::Result;
 use crate::proto;
-use crate::serial::{self, ItemSerial};
+use crate::serial::{self, ItemSerial, PartRef};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Location {
@@ -118,6 +118,50 @@ pub fn set_one_level(protobuf: &[u8], target: usize, level: i64) -> Result<(Vec<
                 Some(sf) => {
                     let serial = proto::wire2_content(entry, sf)?;
                     match serial::releveled(serial, level, false)? {
+                        Some(new_serial) => {
+                            changed = true;
+                            proto::replace_field_content(entry, &ifields, 1, &new_serial)
+                        }
+                        None => entry.to_vec(),
+                    }
+                }
+                None => entry.to_vec(),
+            }
+        } else {
+            entry.to_vec()
+        };
+        proto::emit_wire2_field(&mut out, f.number, &new_entry);
+    }
+    Ok((out, changed))
+}
+
+/// Set part `slot` of the item with [`Item::id`] `target` to `part`, rebuilding
+/// the protobuf. Returns the new protobuf and whether it changed.
+pub fn set_item_part(
+    protobuf: &[u8],
+    target: usize,
+    slot: usize,
+    part: PartRef,
+) -> Result<(Vec<u8>, bool)> {
+    let fields = proto::parse_fields(protobuf)?;
+    let mut out = Vec::with_capacity(protobuf.len());
+    let mut id = 0usize;
+    let mut changed = false;
+    for f in &fields {
+        let is_item_field = matches!(f.number, 41 | 53 | 54) && f.wire_type == 2;
+        if !is_item_field {
+            out.extend_from_slice(&protobuf[f.tag_start..f.end]);
+            continue;
+        }
+        let this_id = id;
+        id += 1;
+        let entry = proto::wire2_content(protobuf, f)?;
+        let new_entry = if this_id == target {
+            let ifields = proto::parse_fields(entry)?;
+            match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
+                Some(sf) => {
+                    let serial = proto::wire2_content(entry, sf)?;
+                    match serial::with_part(serial, slot, part)? {
                         Some(new_serial) => {
                             changed = true;
                             proto::replace_field_content(entry, &ifields, 1, &new_serial)

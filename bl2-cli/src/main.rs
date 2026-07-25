@@ -52,6 +52,25 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// List available parts for an item (to find values for set-part).
+    PartCatalog {
+        sav: PathBuf,
+        /// Item id (from `items`).
+        id: usize,
+        /// Only show parts whose name contains this (case-insensitive).
+        #[arg(default_value = "")]
+        filter: String,
+    },
+    /// Swap one part slot of an item. Find id via `items`, values via `part-catalog`.
+    SetPart {
+        sav: PathBuf,
+        id: usize,
+        slot: usize,
+        lib: u32,
+        asset: u32,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set every backpack + bank item and weapon to a level.
     SetItemLevels {
         sav: PathBuf,
@@ -107,7 +126,54 @@ fn run() -> Result<(), SaveError> {
             edit(&sav, w, "xp", |s| s.xp().unwrap_or(0), |s| s.set_xp(xp))
         }
         Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
+        Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
+        Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
     }
+}
+
+fn cmd_part_catalog(sav: &Path, id: usize, filter: &str) -> Result<(), SaveError> {
+    let s = SaveFile::load(sav)?;
+    let Some(item) = s.items()?.into_iter().find(|it| it.id == id) else {
+        eprintln!("no item with id {id} (see `items`)");
+        return Ok(());
+    };
+    let needle = filter.to_lowercase();
+    let cat = bl2_save::parts_catalog(item.serial.is_weapon, item.serial.set);
+    println!("== parts for item {id} ({} matches) ==", cat.len());
+    for p in cat.iter().filter(|p| needle.is_empty() || p.name.to_lowercase().contains(&needle)) {
+        println!("  {}:{}  {}", p.lib, p.asset, p.name);
+    }
+    Ok(())
+}
+
+fn cmd_set_part(
+    sav: &Path,
+    id: usize,
+    slot: usize,
+    lib: u32,
+    asset: u32,
+    w: WriteOpts,
+) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    let changed = s.set_item_part(id, slot, lib, asset)?;
+    println!("== set part ==");
+    println!("  item {id} slot {slot} -> {lib}:{asset}  ({})", if changed { "changed" } else { "no change — empty slot or bad id" });
+    if !changed || w.dry_run {
+        if w.dry_run {
+            println!("  dry-run : nothing written");
+        }
+        return Ok(());
+    }
+    let out = w.out.as_deref().unwrap_or(sav);
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
 }
 
 fn cmd_set_item_levels(sav: &Path, level: i64, force: bool, w: WriteOpts) -> Result<(), SaveError> {
@@ -181,7 +247,8 @@ fn cmd_items(sav: &Path, show_parts: bool) -> Result<(), SaveError> {
             .balance_name()
             .unwrap_or_else(|| format!("bal {}:{}", ser.balance.lib, ser.balance.asset));
         println!(
-            "  {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  {balance}",
+            "  [{:>2}] {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  {balance}",
+            it.id,
             ser.stage.unwrap_or(0),
         );
         if show_parts {

@@ -190,6 +190,35 @@ impl SaveFile {
         self.proto = new;
         Ok(changed)
     }
+
+    /// Swap part `slot` (0-based) of the item with [`Item::id`] `id` to the part
+    /// `(lib, asset)`. Only changes slots that already hold a part. Returns whether
+    /// it changed. See [`parts_catalog`] for valid `(lib, asset)` values.
+    pub fn set_item_part(&mut self, id: usize, slot: usize, lib: u32, asset: u32) -> Result<bool> {
+        let (new, changed) = items::set_item_part(&self.proto, id, slot, PartRef { lib, asset })?;
+        proto::only_fields_changed(&self.proto, &new, &[41, 53, 54])?;
+        self.proto = new;
+        Ok(changed)
+    }
+}
+
+/// One selectable part in a parts picker.
+#[derive(Clone, Debug)]
+pub struct PartOption {
+    pub lib: u32,
+    pub asset: u32,
+    pub name: String,
+}
+
+/// Every available part (with a readable name) for weapons vs items in a given
+/// set — the choices for a parts picker. NOTE: not filtered by item compatibility,
+/// so arbitrary combinations can produce items the game rejects.
+pub fn parts_catalog(is_weapon: bool, set: u32) -> Vec<PartOption> {
+    let category = if is_weapon { "WeaponParts" } else { "ItemParts" };
+    gameinfo::catalog(category, set)
+        .into_iter()
+        .map(|(lib, asset, name)| PartOption { lib, asset, name })
+        .collect()
 }
 
 #[cfg(test)]
@@ -353,6 +382,26 @@ mod tests {
             if it.serial.is_levelable() {
                 assert_eq!(it.serial.stage, Some(42), "levelable item should be 42");
             }
+        }
+
+        // Parts editing: swap a present part on the first item that has one.
+        if let Some(it) = save
+            .items()
+            .unwrap()
+            .into_iter()
+            .find(|it| !it.serial.is_placeholder() && it.serial.parts.iter().any(|p| p.is_some()))
+        {
+            let cat = parts_catalog(it.serial.is_weapon, it.serial.set);
+            assert!(!cat.is_empty(), "parts catalog must not be empty");
+            let slot = it.serial.parts.iter().position(|p| p.is_some()).unwrap();
+            let choice = &cat[0];
+            let mut edited = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+            assert!(edited.set_item_part(it.id, slot, choice.lib, choice.asset).unwrap());
+            let _ = edited.to_bytes().expect("part edit must self-verify");
+            let after = edited.items().unwrap();
+            let pr = after.iter().find(|x| x.id == it.id).unwrap().serial.parts[slot].unwrap();
+            assert_eq!((pr.lib, pr.asset), (choice.lib, choice.asset), "slot holds chosen part");
+            eprintln!("golden: swapped part slot {slot} to {}", choice.name);
         }
     }
 }

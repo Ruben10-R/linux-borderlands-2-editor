@@ -26,6 +26,25 @@ fn asset_path(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> 
     Some(if pkg.is_empty() { a.to_string() } else { format!("{pkg}.{a}") })
 }
 
+/// Every `(lib, asset, name)` in a category for a set — for building pickers.
+pub(crate) fn catalog(category: &str, set: u32) -> Vec<(u32, u32, String)> {
+    let mut out = Vec::new();
+    let Some(subs) = db().get(category).and_then(|c| c.get(set as usize)).and_then(|s| s.as_array())
+    else {
+        return out;
+    };
+    for (lib, sub) in subs.iter().enumerate() {
+        let Some(assets) = sub.get("a").and_then(|a| a.as_array()) else { continue };
+        for (asset, a) in assets.iter().enumerate() {
+            if let Some(s) = a.as_str() {
+                let seg = s.rsplit('.').next().unwrap_or(s).replace('_', " ");
+                out.push((lib as u32, asset as u32, seg));
+            }
+        }
+    }
+    out
+}
+
 /// A short, human-friendly name for a ref (e.g. "Jakobs", "Jakobs Pistol"),
 /// or None if the ref isn't in our embedded slice.
 pub(crate) fn name(category: &str, set: u32, lib: u32, asset: u32) -> Option<String> {
