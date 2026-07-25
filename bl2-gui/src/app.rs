@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use bl2_save::{Location, SaveError, SaveFile};
+use bl2_save::{Location, ProfileFile, SaveError, SaveFile};
 use eframe::egui;
 
 use crate::theme;
@@ -11,11 +11,26 @@ const MAX: i64 = i32::MAX as i64; // currency/level/xp are int32 in the save
 #[derive(Default)]
 pub struct App {
     doc: Option<Doc>,
+    /// A loaded account profile.bin (mutually exclusive with `doc`).
+    profile: Option<ProfileDoc>,
     /// (is_error, message) shown under the fields.
     status: Option<(bool, String)>,
     theme: theme::Theme,
     show_help: bool,
     tab: Tab,
+}
+
+/// A loaded `profile.bin` plus its editable scratch values.
+struct ProfileDoc {
+    profile: ProfileFile,
+    name: String,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    path: Option<PathBuf>,
+    /// Editable SHiFT Golden Keys (0–255).
+    golden_keys: i64,
+    /// Read-only for now (writing needs token math — slice 2).
+    badass_rank: i64,
+    badass_tokens: i64,
 }
 
 /// Which editor tab is shown.
@@ -189,8 +204,31 @@ impl App {
     }
 
     fn load(&mut self, name: String, path: Option<PathBuf>, bytes: &[u8]) {
+        // A character save is the common case (WSG container); a profile.bin has
+        // no WSG, so it fails SaveFile and we try ProfileFile next.
+        if SaveFile::from_bytes(bytes).is_err() {
+            match ProfileFile::from_bytes(bytes) {
+                Ok(p) => {
+                    self.doc = None;
+                    self.profile = Some(ProfileDoc {
+                        golden_keys: p.golden_keys().unwrap_or(0) as i64,
+                        badass_rank: p.badass_rank().unwrap_or(0) as i64,
+                        badass_tokens: p.badass_tokens().unwrap_or(0) as i64,
+                        name,
+                        path,
+                        profile: p,
+                    });
+                    self.status = Some((false, "Loaded profile.".to_string()));
+                    return;
+                }
+                Err(_) => {
+                    // fall through: report the save error below (the likely intent)
+                }
+            }
+        }
         match SaveFile::from_bytes(bytes) {
             Ok(s) => {
+                self.profile = None;
                 self.doc = Some(Doc {
                     char_name: s.name().unwrap_or_default(),
                     class_def: s.class_def().unwrap_or_default(),
@@ -259,6 +297,17 @@ impl App {
     /// Apply the edited scratch values and write them out (disk on native,
     /// download on web), updating `status`.
     fn save_current(&mut self) {
+        if let Some(pdoc) = self.profile.as_mut() {
+            let current = pdoc.profile.golden_keys().unwrap_or(0) as i64;
+            if pdoc.golden_keys != current {
+                if let Err(e) = pdoc.profile.set_golden_keys(pdoc.golden_keys.clamp(0, 255) as u8) {
+                    self.status = Some((true, format!("edit failed: {e}")));
+                    return;
+                }
+            }
+            self.status = Some(persist_profile(pdoc));
+            return;
+        }
         let Some(doc) = self.doc.as_mut() else {
             return;
         };
@@ -361,6 +410,30 @@ fn persist(doc: &mut Doc) -> (bool, String) {
     }
 }
 
+/// Native: write the edited profile back to disk with a `.bak` backup.
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_profile(pdoc: &mut ProfileDoc) -> (bool, String) {
+    match &pdoc.path {
+        Some(path) => match pdoc.profile.save(path, true) {
+            Ok(()) => (false, format!("Saved {} (backup written alongside).", path.display())),
+            Err(e) => (true, format!("save failed: {e}")),
+        },
+        None => (true, "no file path to write to".to_string()),
+    }
+}
+
+/// Web: download the edited profile.
+#[cfg(target_arch = "wasm32")]
+fn persist_profile(pdoc: &mut ProfileDoc) -> (bool, String) {
+    match pdoc.profile.to_bytes() {
+        Ok(bytes) => {
+            crate::io::download(&pdoc.name, &bytes);
+            (false, format!("Downloaded edited {}.", pdoc.name))
+        }
+        Err(e) => (true, format!("encode failed: {e}")),
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -404,15 +477,40 @@ impl eframe::App for App {
             ui.add_space(4.0);
             ui.separator();
 
-            if self.doc.is_none() {
+            if self.doc.is_none() && self.profile.is_none() {
                 ui.add_space(8.0);
-                ui.label("Drag a .sav file onto this window to load it.");
-                ui.add_space(4.0);
-                ui.weak("No save loaded yet.");
+                ui.label("Drag a character .sav or your account profile.bin onto this window.");
+                ui.add_space(2.0);
+                ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
                 if let Some((true, msg)) = &self.status {
                     ui.add_space(8.0);
                     ui.colored_label(theme::DANGER, msg);
                 }
+                return;
+            }
+
+            // A profile.bin is loaded — show the Profile view (no save tabs).
+            if self.profile.is_some() {
+                ui.add_space(6.0);
+                let label = if cfg!(target_arch = "wasm32") {
+                    "⬇  Download edited profile"
+                } else {
+                    "💾  Save profile (with backup)"
+                };
+                ui.horizontal(|ui| {
+                    if ui.button(egui::RichText::new(label).strong()).clicked() {
+                        self.save_current();
+                    }
+                    ui.weak("· account profile · drag a .sav or profile.bin to load another");
+                });
+                if let Some((is_err, msg)) = &self.status {
+                    let col = if *is_err { theme::DANGER } else { accent };
+                    ui.colored_label(col, msg);
+                }
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+                profile_view(self.profile.as_mut().unwrap(), ui, accent);
                 return;
             }
 
@@ -579,6 +677,42 @@ impl App {
             doc.editing_part_slot = None;
         }
     }
+}
+
+/// The account-profile view (profile.bin): Golden Keys (editable) + Badass (read).
+fn profile_view(pdoc: &mut ProfileDoc, ui: &mut egui::Ui, accent: egui::Color32) {
+    ui.horizontal(|ui| {
+        theme::coin(ui, 20.0);
+        ui.label(egui::RichText::new("Account Profile").color(accent).size(18.0).strong());
+    });
+    ui.add_space(4.0);
+    egui::Grid::new("profile").num_columns(2).spacing([24.0, 8.0]).striped(true).show(ui, |ui| {
+        field(ui, "File", &pdoc.name, accent);
+
+        key(ui, "Golden Keys", accent);
+        ui.horizontal(|ui| {
+            theme::coin(ui, 16.0);
+            edit_number(ui, &mut pdoc.golden_keys, 1.0);
+            pdoc.golden_keys = pdoc.golden_keys.clamp(0, 255);
+            ui.weak("0–255");
+        });
+        ui.end_row();
+
+        key(ui, "Badass Rank", accent);
+        ui.label(pdoc.badass_rank.to_string());
+        ui.end_row();
+
+        key(ui, "Badass Tokens (unspent)", accent);
+        ui.label(pdoc.badass_tokens.to_string());
+        ui.end_row();
+    });
+    ui.add_space(6.0);
+    ui.weak("Golden Keys apply on Save/Download. Badass Rank editing and customization unlocks are coming next.");
+    ui.add_space(2.0);
+    ui.colored_label(
+        theme::DANGER,
+        "⚠ Back up profile.bin first. With Steam Cloud on it may sync — verify in-game.",
+    );
 }
 
 /// Character tab: file, name, class, level, XP, skill points.
