@@ -4,7 +4,10 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>BL2 Save Viewer</title>
+    <title>BL2 Save Editor</title>
+
+    <!-- Original emblem favicon (gold hexagon + diamond), inline SVG — no game assets. -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,3 29,10 29,22 16,29 3,22 3,10' fill='%23F5B11E' stroke='%230C0B09' stroke-width='3'/><polygon points='16,11 21,16 16,21 11,16' fill='%230C0B09'/></svg>" />
 
     <!-- Trunk compiles this crate to WASM and injects the loader here. -->
     <link data-trunk rel="rust" data-wasm-opt="2" />
@@ -17,8 +20,7 @@
             height: 100%;
             width: 100%;
         }
-        body { background: #909090; }
-        @media (prefers-color-scheme: dark) { body { background: #404040; } }
+        body { background: #1b1a16; }
         canvas {
             margin: 0 auto;
             display: block;
@@ -34,14 +36,16 @@
             left: 50%;
             transform: translate(-50%, -50%);
             font-family: sans-serif;
-            color: #f0f0f0;
+            font-weight: bold;
+            letter-spacing: 0.1em;
+            color: #f5b11e;
         }
     </style>
 </head>
 
 <body>
     <canvas id="the_canvas_id"></canvas>
-    <p id="loading_text">Loading…</p>
+    <p id="loading_text">LOADING…</p>
 </body>
 
 </html>

@@ -1,6 +1,8 @@
 use bl2_save::SaveFile;
 use eframe::egui;
 
+use crate::theme;
+
 /// The read-only viewer application state.
 #[derive(Default)]
 pub struct App {
@@ -19,7 +21,8 @@ struct Loaded {
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        theme::apply(&cc.egui_ctx);
         Self::default()
     }
 
@@ -86,27 +89,59 @@ impl eframe::App for App {
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.heading("Borderlands 2 — Save Viewer");
-            ui.label("Drag a .sav file onto this window to inspect it. (Read-only.)");
+            // Header: original emblem + wordmark.
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                theme::emblem(ui, 44.0);
+                ui.add_space(10.0);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("BL2 SAVE EDITOR")
+                            .color(theme::GOLD)
+                            .size(24.0)
+                            .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new("read-only save viewer")
+                            .color(theme::CREAM)
+                            .italics(),
+                    );
+                });
+            });
+            ui.add_space(4.0);
             ui.separator();
+            ui.label("Drag a .sav file onto this window to inspect it.");
+            ui.add_space(6.0);
 
             if let Some(err) = &self.error {
-                ui.colored_label(egui::Color32::from_rgb(0xD0, 0x40, 0x40), format!("⚠ {err}"));
+                ui.colored_label(theme::DANGER, format!("⚠ {err}"));
             }
 
             match &self.loaded {
                 Some(s) => {
                     egui::Grid::new("general")
                         .num_columns(2)
-                        .spacing([24.0, 6.0])
+                        .spacing([24.0, 8.0])
                         .striped(true)
                         .show(ui, |ui| {
                             field(ui, "File", &s.file);
                             field(ui, "Class", &s.class);
                             field(ui, "Level", &s.level.to_string());
                             field(ui, "XP", &s.xp.to_string());
-                            field(ui, "Money", &s.money.to_string());
-                            field(ui, "Eridium", &s.eridium.to_string());
+
+                            key(ui, "Money");
+                            ui.horizontal(|ui| {
+                                theme::coin(ui, 16.0);
+                                ui.monospace(s.money.to_string());
+                            });
+                            ui.end_row();
+
+                            key(ui, "Eridium");
+                            ui.horizontal(|ui| {
+                                theme::eridium(ui, 16.0);
+                                ui.monospace(s.eridium.to_string());
+                            });
+                            ui.end_row();
                         });
                 }
                 None if self.error.is_none() => {
@@ -119,8 +154,14 @@ impl eframe::App for App {
     }
 }
 
-fn field(ui: &mut egui::Ui, key: &str, value: &str) {
-    ui.strong(key);
+/// A gold, bold key label (left column of the grid).
+fn key(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).color(theme::GOLD).strong());
+}
+
+/// A full "key : value" grid row with a monospace value.
+fn field(ui: &mut egui::Ui, k: &str, value: &str) {
+    key(ui, k);
     ui.monospace(value);
     ui.end_row();
 }
