@@ -67,7 +67,7 @@ over your original (browsers can't write files directly).
 - **Character** — name, class, head & skin, level (+ XP *Sync*), XP, skill points, specialist points
 - **General** — playthroughs completed (unlock TVHM/UVHM), current playthrough, Overpower level, backpack/bank slots, save info
 - **Currency** — money, eridium, seraph crystals, torgue tokens
-- **Items** — per-item level, part swapping, shareable **`BL2(…)` item codes** (import/export), backpack ↔ bank
+- **Items** — per-item level, part swapping, shareable **`BL2(…)` item codes** (export, and **batch import** — paste many codes separated by any of `, | \ /`), backpack ↔ bank
 - **Fast Travel** — unlock stations (base game + DLC)
 - **Raw** — a named, searchable inspector; edit scalar fields directly (with hover help)
 

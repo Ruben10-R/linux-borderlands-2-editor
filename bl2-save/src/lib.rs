@@ -567,6 +567,38 @@ impl SaveFile {
         self.proto = new;
         Ok(())
     }
+
+    /// Import every `BL2(...)` code found in `text` (any separators — commas,
+    /// pipes, slashes, newlines — are fine, since each code is scanned as
+    /// `BL2(` … `)`). Returns (imported, failed).
+    pub fn add_items_from_codes(&mut self, text: &str, to_bank: bool) -> (usize, usize) {
+        let (mut ok, mut failed) = (0, 0);
+        for code in extract_codes(text) {
+            match self.add_item_from_code(&code, to_bank) {
+                Ok(()) => ok += 1,
+                Err(_) => failed += 1,
+            }
+        }
+        (ok, failed)
+    }
+}
+
+/// Pull every `BL2(...)` token out of free text. A code's base64 body can
+/// contain `/` and `+`, but never `)`, so scanning `BL2(` up to the next `)`
+/// robustly separates codes regardless of the separators between them.
+pub fn extract_codes(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("BL2(") {
+        let after = &rest[start..];
+        if let Some(end) = after.find(')') {
+            out.push(after[..=end].to_string());
+            rest = &after[end + 1..];
+        } else {
+            break;
+        }
+    }
+    out
 }
 
 /// The six playable classes: (display name, class-definition asset path).
@@ -715,6 +747,17 @@ mod tests {
         assert_eq!(s.money(), 608);
         assert_eq!(s.eridium(), 0);
         assert_eq!(s.class_name().as_deref(), Some("Zer0 (Assassin)"));
+    }
+
+    #[test]
+    fn extract_codes_handles_separators_and_slashes() {
+        // Codes contain '/' and '+'; separators between them vary.
+        let text = "BL2(aa/bb+cc) , BL2(dd) | BL2(ee) / junk BL2(ff)\nBL2(gg)";
+        let codes = extract_codes(text);
+        assert_eq!(codes, ["BL2(aa/bb+cc)", "BL2(dd)", "BL2(ee)", "BL2(ff)", "BL2(gg)"]);
+        assert!(extract_codes("no codes here").is_empty());
+        // an unterminated trailing code is ignored
+        assert_eq!(extract_codes("BL2(ok) BL2(unterminated"), ["BL2(ok)"]);
     }
 
     #[test]

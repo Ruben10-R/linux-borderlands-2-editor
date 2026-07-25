@@ -1074,32 +1074,35 @@ fn items_tab(
 ) -> Option<(bool, String)> {
     let mut status = None;
 
-    // Import: paste a BL2(...) code and drop a fresh copy into backpack or bank.
+    // Import: paste one OR MANY BL2(...) codes (any separators) → backpack/bank.
     ui.horizontal(|ui| {
         theme::crate_icon(ui, 14.0, accent);
-        ui.label("Add item from code:");
+        ui.label("Add item code(s):");
         ui.add(
             egui::TextEdit::singleline(&mut doc.import_code)
-                .hint_text("BL2(...)")
-                .desired_width(260.0),
+                .hint_text("paste one or more BL2(...) codes")
+                .desired_width(300.0),
         );
-        let code = doc.import_code.trim().to_string();
-        let valid = code.starts_with("BL2(") && code.ends_with(')');
+        let found = bl2_save::extract_codes(&doc.import_code).len();
         let mut do_import = None;
-        if ui.add_enabled(valid, egui::Button::new("→ Backpack")).clicked() {
+        if ui.add_enabled(found > 0, egui::Button::new("→ Backpack")).clicked() {
             do_import = Some(false);
         }
-        if ui.add_enabled(valid, egui::Button::new("→ Bank")).clicked() {
+        if ui.add_enabled(found > 0, egui::Button::new("→ Bank")).clicked() {
             do_import = Some(true);
         }
+        if found > 1 {
+            ui.weak(format!("{found} codes"));
+        }
         if let Some(to_bank) = do_import {
-            status = Some(match doc.save.add_item_from_code(&code, to_bank) {
-                Ok(()) => {
-                    rebuild_items_preserving_levels(doc);
-                    doc.import_code.clear();
-                    (false, format!("Imported item into {}.", if to_bank { "bank" } else { "backpack" }))
-                }
-                Err(e) => (true, format!("Import failed: {e}")),
+            let (ok, failed) = doc.save.add_items_from_codes(&doc.import_code, to_bank);
+            rebuild_items_preserving_levels(doc);
+            doc.import_code.clear();
+            let where_ = if to_bank { "bank" } else { "backpack" };
+            status = Some(if failed == 0 {
+                (false, format!("Imported {ok} item(s) into {where_}."))
+            } else {
+                (true, format!("Imported {ok} into {where_}; {failed} code(s) failed."))
             });
         }
     });

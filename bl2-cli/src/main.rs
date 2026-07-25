@@ -180,10 +180,10 @@ enum Cmd {
     ExportCodes {
         sav: PathBuf,
     },
-    /// Import a BL2(...) item code as a new backpack (or bank) item.
+    /// Import one or more BL2(...) item codes into the backpack (or bank).
     ImportCode {
         sav: PathBuf,
-        /// The BL2(...) code to import.
+        /// One or many BL2(...) codes (any separators — quote the whole string).
         code: String,
         /// Add to the bank instead of the backpack.
         #[arg(long)]
@@ -518,12 +518,20 @@ fn cmd_export_codes(sav: &Path) -> Result<(), SaveError> {
 
 fn cmd_import_code(sav: &Path, code: &str, bank: bool, w: WriteOpts) -> Result<(), SaveError> {
     let mut s = SaveFile::load(sav)?;
-    let before = s.items()?.len();
-    s.add_item_from_code(code, bank)?;
+    // Accepts one or many BL2(...) codes in `code` (any separators).
+    let (added, failed) = s.add_items_from_codes(code, bank);
+    if added == 0 {
+        eprintln!("no valid BL2(...) codes found");
+        return Ok(());
+    }
     let out = w.out.as_deref().unwrap_or(sav);
     println!("== import code ==");
     println!("  input   : {}", sav.display());
-    println!("  added   : 1 item into {} ({} -> {} entries)", if bank { "bank" } else { "backpack" }, before, before + 1);
+    println!(
+        "  added   : {added} item(s) into {}{}",
+        if bank { "bank" } else { "backpack" },
+        if failed > 0 { format!(" ({failed} failed)") } else { String::new() }
+    );
     if w.dry_run {
         println!("  dry-run : nothing written");
         return Ok(());
