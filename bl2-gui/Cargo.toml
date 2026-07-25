@@ -7,7 +7,9 @@ description = "Read-only Borderlands 2 save viewer (egui/eframe) — builds nati
 [dependencies]
 bl2-save = { workspace = true }
 egui = "0.34"
-eframe = "0.34"
+# "persistence" adds eframe's Storage (RON file on native, localStorage on web)
+# so the last-used theme + look survive restarts.
+eframe = { version = "0.34", features = ["persistence"] }
 log = "0.4"
 
 # Native file open/save dialogs (GTK backend on Linux; native dialogs on Win/Mac).

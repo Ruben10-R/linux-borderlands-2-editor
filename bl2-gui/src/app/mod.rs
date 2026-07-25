@@ -16,6 +16,8 @@ pub struct App {
     /// (is_error, message) shown under the fields.
     status: Option<(bool, String)>,
     theme: theme::Theme,
+    /// Classic (original flat) vs Modern (rounded, elevated) styling.
+    look: theme::Look,
     show_help: bool,
     tab: Tab,
     /// Web-only: file bytes picked by the browser Open dialog (async), consumed
@@ -217,8 +219,17 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let app = Self::default();
-        theme::apply(&cc.egui_ctx, app.theme);
+        let mut app = Self::default();
+        // Restore the last-used theme + look (native: RON file; web: localStorage).
+        if let Some(storage) = cc.storage {
+            if let Some(i) = eframe::get_value::<u8>(storage, "theme") {
+                app.theme = theme::Theme::from_index(i);
+            }
+            if let Some(i) = eframe::get_value::<u8>(storage, "look") {
+                app.look = theme::Look::from_index(i);
+            }
+        }
+        theme::apply(&cc.egui_ctx, app.theme, app.look);
         app
     }
 
@@ -609,8 +620,14 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         // Re-apply every frame so our theme wins over eframe's system-theme
         // following (otherwise the web build reverts to the browser's light mode).
-        theme::apply(&ctx, self.theme);
+        theme::apply(&ctx, self.theme, self.look);
         self.handle_dropped(&ctx);
+
+        // Floating look-switcher (bottom-right), above everything.
+        if theme::fab(&ctx, self.look, self.theme.accent()) {
+            self.look = self.look.other();
+            theme::apply(&ctx, self.theme, self.look);
+        }
 
         // Web: consume a file picked asynchronously by the browser Open dialog.
         #[cfg(target_arch = "wasm32")]
@@ -627,185 +644,198 @@ impl eframe::App for App {
             });
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            let accent = self.theme.accent();
-            let text = self.theme.text();
+        let look = self.look;
+        // Modern floats the content as an elevated card over a darker backdrop.
+        let panel_frame = if look == theme::Look::Modern {
+            egui::Frame::central_panel(&ctx.global_style())
+                .fill(self.theme.backdrop())
+                .inner_margin(egui::Margin::same(14))
+        } else {
+            egui::Frame::central_panel(&ctx.global_style())
+        };
+        egui::CentralPanel::default()
+            .frame(panel_frame)
+            .show_inside(ui, |ui| {
+                theme::card(ui, look, |ui| {
+                    let accent = self.theme.accent();
+                    let text = self.theme.text();
 
-            // Header: original emblem + wordmark.
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                theme::emblem(ui, 44.0, accent);
-                ui.add_space(10.0);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("BL2 SAVE EDITOR")
-                            .color(accent)
-                            .size(24.0)
-                            .strong(),
-                    );
-                    ui.label(
-                        egui::RichText::new("Borderlands 2 save editor")
-                            .color(text)
-                            .italics(),
-                    );
+                    // Header: original emblem + wordmark.
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        theme::emblem(ui, 44.0, accent);
+                        ui.add_space(10.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("BL2 SAVE EDITOR")
+                                    .color(accent)
+                                    .size(24.0)
+                                    .strong(),
+                            );
+                            ui.label(
+                                egui::RichText::new("Borderlands 2 save editor")
+                                    .color(text)
+                                    .italics(),
+                            );
+                        });
+                    });
+
+                    // Theme switcher.
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Theme:");
+                        for t in theme::Theme::ALL {
+                            if ui.selectable_label(self.theme == t, t.label()).clicked() {
+                                self.theme = t;
+                                theme::apply(&ctx, t, self.look);
+                            }
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // Open (OS file dialog on native, browser picker on web).
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("📂  Open file…").clicked() {
+                            self.open_dialog();
+                        }
+                        ui.weak("· or drag a .sav / profile.bin onto the window");
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    if self.doc.is_none() && self.profile.is_none() {
+                        ui.add_space(8.0);
+                        ui.label("Open or drag a character .sav or your account profile.bin.");
+                        ui.add_space(2.0);
+                        ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
+                        if let Some((true, msg)) = &self.status {
+                            ui.add_space(8.0);
+                            ui.colored_label(theme::DANGER, msg);
+                        }
+                        return;
+                    }
+
+                    // A profile.bin is loaded — show the Profile view (no save tabs).
+                    if self.profile.is_some() {
+                        ui.add_space(6.0);
+                        let label = if cfg!(target_arch = "wasm32") {
+                            "⬇  Download edited profile"
+                        } else {
+                            "💾  Save profile (with backup)"
+                        };
+                        ui.horizontal(|ui| {
+                            if ui.button(egui::RichText::new(label).strong()).clicked() {
+                                self.save_current();
+                            }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if ui.button("Save As…").clicked() {
+                                self.save_as_dialog();
+                            }
+                            ui.weak("· account profile");
+                        });
+                        if let Some((is_err, msg)) = &self.status {
+                            let col = if *is_err { theme::DANGER } else { accent };
+                            ui.colored_label(col, msg);
+                        }
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+                        profile_view(self.profile.as_mut().unwrap(), ui, accent);
+                        return;
+                    }
+
+                    // Global actions (apply to the whole save, whatever tab is open).
+                    ui.add_space(6.0);
+                    let label = if cfg!(target_arch = "wasm32") {
+                        "⬇  Download edited save"
+                    } else {
+                        "💾  Save (with backup)"
+                    };
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new(label).strong()).clicked() {
+                            self.save_current();
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if ui.button("Save As…").clicked() {
+                            self.save_as_dialog();
+                        }
+                        if cfg!(target_arch = "wasm32")
+                            && ui.button("ⓘ  How to install this save").clicked()
+                        {
+                            self.show_help = true;
+                        }
+                    });
+                    if let Some((is_err, msg)) = &self.status {
+                        let col = if *is_err { theme::DANGER } else { accent };
+                        ui.colored_label(col, msg);
+                    }
+
+                    // Tab bar (each tab gets an original glyph in its state colour).
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for t in Tab::ALL {
+                            let col = if self.tab == t { accent } else { text };
+                            match t {
+                                Tab::Character => theme::head(ui, 16.0, col),
+                                Tab::General => theme::flag(ui, 16.0, col),
+                                Tab::Currency => theme::coin(ui, 16.0),
+                                Tab::Items => theme::crate_icon(ui, 16.0, col),
+                                Tab::FastTravel => theme::signpost(ui, 16.0, col),
+                                Tab::Vehicle => theme::wheel(ui, 16.0, col),
+                                Tab::Raw => theme::page(ui, 16.0, col),
+                                Tab::About => theme::info(ui, 16.0, col),
+                            }
+                            let label = egui::RichText::new(t.label()).color(col).strong();
+                            if ui.selectable_label(self.tab == t, label).clicked() {
+                                self.tab = t;
+                            }
+                            ui.add_space(10.0);
+                        }
+                    });
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    // Tab content.
+                    let tab = self.tab;
+                    let doc = self.doc.as_mut().unwrap();
+                    let tab_status = match tab {
+                        Tab::Character => {
+                            character_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::General => {
+                            general_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::Currency => {
+                            currency_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::Items => items_tab(doc, ui, accent, text),
+                        Tab::FastTravel => {
+                            fast_travel_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::Vehicle => {
+                            vehicle_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::Raw => {
+                            raw_tab(doc, ui, accent);
+                            None
+                        }
+                        Tab::About => {
+                            about_tab(ui, accent);
+                            None
+                        }
+                    };
+                    if let Some(s) = tab_status {
+                        self.status = Some(s);
+                    }
                 });
             });
-
-            // Theme switcher.
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Theme:");
-                for t in theme::Theme::ALL {
-                    if ui.selectable_label(self.theme == t, t.label()).clicked() {
-                        self.theme = t;
-                        theme::apply(&ctx, t);
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            ui.separator();
-
-            // Open (OS file dialog on native, browser picker on web).
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button("📂  Open file…").clicked() {
-                    self.open_dialog();
-                }
-                ui.weak("· or drag a .sav / profile.bin onto the window");
-            });
-            ui.add_space(4.0);
-            ui.separator();
-
-            if self.doc.is_none() && self.profile.is_none() {
-                ui.add_space(8.0);
-                ui.label("Open or drag a character .sav or your account profile.bin.");
-                ui.add_space(2.0);
-                ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
-                if let Some((true, msg)) = &self.status {
-                    ui.add_space(8.0);
-                    ui.colored_label(theme::DANGER, msg);
-                }
-                return;
-            }
-
-            // A profile.bin is loaded — show the Profile view (no save tabs).
-            if self.profile.is_some() {
-                ui.add_space(6.0);
-                let label = if cfg!(target_arch = "wasm32") {
-                    "⬇  Download edited profile"
-                } else {
-                    "💾  Save profile (with backup)"
-                };
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new(label).strong()).clicked() {
-                        self.save_current();
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    if ui.button("Save As…").clicked() {
-                        self.save_as_dialog();
-                    }
-                    ui.weak("· account profile");
-                });
-                if let Some((is_err, msg)) = &self.status {
-                    let col = if *is_err { theme::DANGER } else { accent };
-                    ui.colored_label(col, msg);
-                }
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                profile_view(self.profile.as_mut().unwrap(), ui, accent);
-                return;
-            }
-
-            // Global actions (apply to the whole save, whatever tab is open).
-            ui.add_space(6.0);
-            let label = if cfg!(target_arch = "wasm32") {
-                "⬇  Download edited save"
-            } else {
-                "💾  Save (with backup)"
-            };
-            ui.horizontal(|ui| {
-                if ui.button(egui::RichText::new(label).strong()).clicked() {
-                    self.save_current();
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                if ui.button("Save As…").clicked() {
-                    self.save_as_dialog();
-                }
-                if cfg!(target_arch = "wasm32")
-                    && ui.button("ⓘ  How to install this save").clicked()
-                {
-                    self.show_help = true;
-                }
-            });
-            if let Some((is_err, msg)) = &self.status {
-                let col = if *is_err { theme::DANGER } else { accent };
-                ui.colored_label(col, msg);
-            }
-
-            // Tab bar (each tab gets an original glyph in its state colour).
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                for t in Tab::ALL {
-                    let col = if self.tab == t { accent } else { text };
-                    match t {
-                        Tab::Character => theme::head(ui, 16.0, col),
-                        Tab::General => theme::flag(ui, 16.0, col),
-                        Tab::Currency => theme::coin(ui, 16.0),
-                        Tab::Items => theme::crate_icon(ui, 16.0, col),
-                        Tab::FastTravel => theme::signpost(ui, 16.0, col),
-                        Tab::Vehicle => theme::wheel(ui, 16.0, col),
-                        Tab::Raw => theme::page(ui, 16.0, col),
-                        Tab::About => theme::info(ui, 16.0, col),
-                    }
-                    let label = egui::RichText::new(t.label()).color(col).strong();
-                    if ui.selectable_label(self.tab == t, label).clicked() {
-                        self.tab = t;
-                    }
-                    ui.add_space(10.0);
-                }
-            });
-            ui.separator();
-            ui.add_space(6.0);
-
-            // Tab content.
-            let tab = self.tab;
-            let doc = self.doc.as_mut().unwrap();
-            let tab_status = match tab {
-                Tab::Character => {
-                    character_tab(doc, ui, accent);
-                    None
-                }
-                Tab::General => {
-                    general_tab(doc, ui, accent);
-                    None
-                }
-                Tab::Currency => {
-                    currency_tab(doc, ui, accent);
-                    None
-                }
-                Tab::Items => items_tab(doc, ui, accent, text),
-                Tab::FastTravel => {
-                    fast_travel_tab(doc, ui, accent);
-                    None
-                }
-                Tab::Vehicle => {
-                    vehicle_tab(doc, ui, accent);
-                    None
-                }
-                Tab::Raw => {
-                    raw_tab(doc, ui, accent);
-                    None
-                }
-                Tab::About => {
-                    about_tab(ui, accent);
-                    None
-                }
-            };
-            if let Some(s) = tab_status {
-                self.status = Some(s);
-            }
-        });
 
         // Parts picker modal — floats with full space; search keeps focus.
         self.parts_picker_modal(&ctx);
@@ -824,6 +854,12 @@ impl eframe::App for App {
                 self.show_help = false;
             }
         }
+    }
+
+    /// Persist the chosen theme + look (native: RON file; web: localStorage).
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "theme", &self.theme.index());
+        eframe::set_value(storage, "look", &self.look.index());
     }
 }
 

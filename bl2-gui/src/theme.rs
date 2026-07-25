@@ -22,16 +22,26 @@ pub enum Theme {
     VaultHunter,
     Eridium,
     Slaughter,
+    Corrosive,
+    Shock,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 3] = [Theme::VaultHunter, Theme::Eridium, Theme::Slaughter];
+    pub const ALL: [Theme; 5] = [
+        Theme::VaultHunter,
+        Theme::Eridium,
+        Theme::Slaughter,
+        Theme::Corrosive,
+        Theme::Shock,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Theme::VaultHunter => "Vault Hunter",
             Theme::Eridium => "Eridium",
             Theme::Slaughter => "Slaughter",
+            Theme::Corrosive => "Corrosive",
+            Theme::Shock => "Shock",
         }
     }
 
@@ -61,6 +71,22 @@ impl Theme {
                 text: Color32::from_rgb(0xF0, 0xE2, 0xD8),
                 accent: Color32::from_rgb(0xE8, 0x53, 0x36),
             },
+            // Dark moss + acid green (corrosive).
+            Theme::Corrosive => Palette {
+                ink: Color32::from_rgb(0x14, 0x1A, 0x10),
+                ink_soft: Color32::from_rgb(0x20, 0x29, 0x18),
+                extreme: Color32::from_rgb(0x0D, 0x11, 0x0A),
+                text: Color32::from_rgb(0xE2, 0xEC, 0xD4),
+                accent: Color32::from_rgb(0x9C, 0xD9, 0x2B),
+            },
+            // Deep navy + electric blue (shock).
+            Theme::Shock => Palette {
+                ink: Color32::from_rgb(0x10, 0x16, 0x20),
+                ink_soft: Color32::from_rgb(0x1A, 0x23, 0x31),
+                extreme: Color32::from_rgb(0x0A, 0x0E, 0x16),
+                text: Color32::from_rgb(0xDC, 0xE6, 0xF4),
+                accent: Color32::from_rgb(0x3A, 0xC6, 0xF2),
+            },
         }
     }
 
@@ -73,6 +99,74 @@ impl Theme {
     pub fn text(self) -> Color32 {
         self.palette().text
     }
+
+    /// The darkest palette tone — the app backdrop behind Modern cards.
+    pub fn backdrop(self) -> Color32 {
+        self.palette().extreme
+    }
+
+    /// Stable index for on-disk persistence (never reorder these).
+    pub fn index(self) -> u8 {
+        match self {
+            Theme::VaultHunter => 0,
+            Theme::Eridium => 1,
+            Theme::Slaughter => 2,
+            Theme::Corrosive => 3,
+            Theme::Shock => 4,
+        }
+    }
+
+    pub fn from_index(i: u8) -> Theme {
+        match i {
+            1 => Theme::Eridium,
+            2 => Theme::Slaughter,
+            3 => Theme::Corrosive,
+            4 => Theme::Shock,
+            _ => Theme::VaultHunter,
+        }
+    }
+}
+
+/// Which visual *style* the UI wears. `Classic` is the original flat look;
+/// `Modern` is rounded "card" components with elevation and roomier spacing
+/// (PrimeVue/Vuetify-flavoured) — still on the Borderlands palette.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Look {
+    Classic,
+    #[default]
+    Modern,
+}
+
+impl Look {
+    pub fn label(self) -> &'static str {
+        match self {
+            Look::Classic => "Classic",
+            Look::Modern => "Modern",
+        }
+    }
+
+    /// The opposite look — what the floating toggle switches to.
+    pub fn other(self) -> Look {
+        match self {
+            Look::Classic => Look::Modern,
+            Look::Modern => Look::Classic,
+        }
+    }
+
+    /// Stable index for on-disk persistence (never reorder these).
+    pub fn index(self) -> u8 {
+        match self {
+            Look::Classic => 0,
+            Look::Modern => 1,
+        }
+    }
+
+    pub fn from_index(i: u8) -> Look {
+        match i {
+            0 => Look::Classic,
+            _ => Look::Modern,
+        }
+    }
 }
 
 struct Palette {
@@ -83,10 +177,27 @@ struct Palette {
     accent: Color32,
 }
 
-/// Apply the chosen theme to the whole context. Call at startup and on change.
-pub fn apply(ctx: &egui::Context, theme: Theme) {
+/// Blend two colours: `t=0` → `a`, `t=1` → `b`.
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgb(f(a.r(), b.r()), f(a.g(), b.g()), f(a.b(), b.b()))
+}
+
+/// Lighten a colour towards white by `t`.
+fn lighten(c: Color32, t: f32) -> Color32 {
+    mix(c, Color32::WHITE, t)
+}
+
+/// Apply the chosen theme + look to the whole context. Called every frame (so
+/// our styling wins over eframe's system-theme following) and on any change.
+pub fn apply(ctx: &egui::Context, theme: Theme, look: Look) {
     let p = theme.palette();
+    // Start from a fresh Style each frame so toggling back to Classic also
+    // resets the roomier Modern spacing.
+    let mut style = egui::Style::default();
     let mut v = egui::Visuals::dark();
+
+    // Palette — shared by both looks.
     v.panel_fill = p.ink;
     v.window_fill = p.ink;
     v.faint_bg_color = p.ink_soft; // striped grid rows
@@ -96,7 +207,189 @@ pub fn apply(ctx: &egui::Context, theme: Theme) {
     v.selection.bg_fill = p.accent.linear_multiply(0.35);
     v.selection.stroke = Stroke::new(1.0_f32, p.accent);
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
-    ctx.set_visuals(v);
+
+    if look == Look::Modern {
+        // Elevated surfaces derived from the palette's near-black ink.
+        let surface = lighten(p.ink, 0.06); // card fill
+        let raised = lighten(p.ink, 0.11); // buttons/fields at rest
+        let hover = lighten(p.ink, 0.17);
+        let border = lighten(p.ink, 0.22);
+        let shadow = Color32::from_black_alpha(120);
+        let cr = egui::CornerRadius::same(9);
+
+        v.window_fill = surface;
+        v.window_corner_radius = egui::CornerRadius::same(14);
+        v.window_stroke = Stroke::new(1.0_f32, border);
+        v.menu_corner_radius = egui::CornerRadius::same(12);
+        v.faint_bg_color = raised; // striped rows a touch lighter on the card
+        v.window_shadow = egui::Shadow {
+            offset: [0, 8],
+            blur: 24,
+            spread: 0,
+            color: shadow,
+        };
+        v.popup_shadow = egui::Shadow {
+            offset: [0, 6],
+            blur: 18,
+            spread: 0,
+            color: shadow,
+        };
+
+        let w = &mut v.widgets;
+        w.noninteractive.bg_fill = surface;
+        w.noninteractive.weak_bg_fill = surface;
+        w.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
+        w.noninteractive.corner_radius = cr;
+
+        w.inactive.bg_fill = raised;
+        w.inactive.weak_bg_fill = raised;
+        w.inactive.bg_stroke = Stroke::new(1.0_f32, border);
+        w.inactive.fg_stroke = Stroke::new(1.0_f32, p.text);
+        w.inactive.corner_radius = cr;
+
+        w.hovered.bg_fill = hover;
+        w.hovered.weak_bg_fill = hover;
+        w.hovered.bg_stroke = Stroke::new(1.3_f32, p.accent);
+        w.hovered.fg_stroke = Stroke::new(1.0_f32, p.text);
+        w.hovered.corner_radius = cr;
+        w.hovered.expansion = 1.0;
+
+        let pressed = mix(p.ink, p.accent, 0.30);
+        w.active.bg_fill = pressed;
+        w.active.weak_bg_fill = pressed;
+        w.active.bg_stroke = Stroke::new(1.5_f32, p.accent);
+        w.active.fg_stroke = Stroke::new(1.0_f32, p.text);
+        w.active.corner_radius = cr;
+        w.active.expansion = 1.0;
+
+        w.open.bg_fill = raised;
+        w.open.weak_bg_fill = raised;
+        w.open.bg_stroke = Stroke::new(1.0_f32, border);
+        w.open.corner_radius = cr;
+
+        // Roomier component spacing.
+        style.spacing.button_padding = egui::vec2(14.0, 8.0);
+        style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        style.spacing.menu_margin = egui::Margin::same(8);
+        style.spacing.window_margin = egui::Margin::same(12);
+        style.spacing.interact_size.y = 30.0;
+        style.spacing.indent = 22.0;
+    }
+
+    style.visuals = v;
+    ctx.set_global_style(style);
+}
+
+/// Wrap `add` in an elevated rounded card when the Modern look is active; in
+/// Classic it's a no-op passthrough (keeps the original flat layout).
+pub fn card<R>(ui: &mut egui::Ui, look: Look, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if look == Look::Classic {
+        return add(ui);
+    }
+    let (fill, stroke, shadow) = {
+        let v = ui.visuals();
+        (v.window_fill, v.window_stroke, v.window_shadow)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(14))
+        .inner_margin(egui::Margin::same(16))
+        .shadow(shadow)
+        .show(ui, add)
+        .inner
+}
+
+/// The floating look-switcher: an accent pill anchored bottom-right, labelled
+/// "Switch to Classic/Modern" with a matching glyph. Returns `true` when clicked.
+pub fn fab(ctx: &egui::Context, look: Look, accent: Color32) -> bool {
+    let mut clicked = false;
+    egui::Area::new(egui::Id::new("look_fab"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-22.0, -22.0))
+        .show(ctx, |ui| {
+            let target = look.other();
+            // Dark text/glyph reads well on every bright accent.
+            let galley = ui.painter().layout_no_wrap(
+                format!("Switch to {}", target.label()),
+                egui::FontId::proportional(14.5),
+                OUTLINE,
+            );
+            let pad = Vec2::new(16.0, 11.0);
+            let glyph_w = 20.0;
+            let gap = 8.0;
+            let size = Vec2::new(
+                pad.x * 2.0 + glyph_w + gap + galley.size().x,
+                galley.size().y.max(18.0) + pad.y * 2.0,
+            );
+            let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+            let p = ui.painter();
+            let cr = egui::CornerRadius::same((rect.height() * 0.5) as u8);
+            // Soft drop shadow.
+            p.rect_filled(
+                rect.translate(Vec2::new(0.0, 3.0)),
+                cr,
+                Color32::from_black_alpha(80),
+            );
+            // Body (brightens on hover).
+            let body = if resp.hovered() {
+                accent
+            } else {
+                accent.linear_multiply(0.88)
+            };
+            p.rect_filled(rect, cr, body);
+            p.rect_stroke(
+                rect,
+                cr,
+                Stroke::new(2.0_f32, OUTLINE),
+                egui::StrokeKind::Inside,
+            );
+            // Glyph, then label.
+            let gc = Pos2::new(rect.left() + pad.x + glyph_w * 0.5, rect.center().y);
+            fab_glyph(p, gc, 30.0, target);
+            let text_pos = Pos2::new(
+                rect.left() + pad.x + glyph_w + gap,
+                rect.center().y - galley.size().y * 0.5,
+            );
+            p.galley(text_pos, galley, OUTLINE);
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            clicked = resp.clicked();
+        });
+    clicked
+}
+
+/// The glyph inside the FAB: a sparkle when it will switch *to* Modern, or a
+/// plain 3-bar list when it will switch *to* Classic.
+fn fab_glyph(p: &egui::Painter, c: Pos2, d: f32, target: Look) {
+    match target {
+        Look::Modern => {
+            let r = d * 0.2;
+            let r2 = r * 0.62;
+            let s = Stroke::new(d * 0.06, OUTLINE);
+            p.line_segment([Pos2::new(c.x, c.y - r), Pos2::new(c.x, c.y + r)], s);
+            p.line_segment([Pos2::new(c.x - r, c.y), Pos2::new(c.x + r, c.y)], s);
+            p.line_segment(
+                [Pos2::new(c.x - r2, c.y - r2), Pos2::new(c.x + r2, c.y + r2)],
+                s,
+            );
+            p.line_segment(
+                [Pos2::new(c.x - r2, c.y + r2), Pos2::new(c.x + r2, c.y - r2)],
+                s,
+            );
+        }
+        Look::Classic => {
+            let w = d * 0.22;
+            for i in 0..3 {
+                let y = c.y - d * 0.12 + i as f32 * d * 0.12;
+                p.line_segment(
+                    [Pos2::new(c.x - w, y), Pos2::new(c.x + w, y)],
+                    Stroke::new(d * 0.05, OUTLINE),
+                );
+            }
+        }
+    }
 }
 
 fn alloc(ui: &mut egui::Ui, size: f32) -> (egui::Rect, egui::Painter) {
