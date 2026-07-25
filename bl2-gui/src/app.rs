@@ -68,12 +68,14 @@ struct Doc {
     part_catalog_key: Option<(bool, u32)>,
     /// Scratch input for the "add item from code" (BL2(...)) field.
     import_code: String,
+    /// Items sub-tab: false = Backpack, true = Bank.
+    show_bank: bool,
 }
 
 /// One inventory row: `level` is an editable scratch value applied on save.
 struct ItemView {
     id: usize,
-    location: &'static str,
+    is_bank: bool,
     is_weapon: bool,
     /// False for grade-≤1 "no-level" items — locked (leveling can break them).
     levelable: bool,
@@ -81,6 +83,10 @@ struct ItemView {
     name: String,
     /// Balance + parts breakdown, shown on hover.
     details: String,
+    /// Resolved header fields, for the item detail form.
+    type_name: String,
+    balance: String,
+    manufacturer: String,
     is_weapon_set: (bool, u32),
     /// Present part slots (editable).
     parts: Vec<PartSlotView>,
@@ -124,23 +130,21 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
                     })
                 })
                 .collect();
+            let manufacturer = ser.manufacturer_name().unwrap_or_default();
+            let type_name = ser
+                .type_name()
+                .unwrap_or_else(|| format!("type {}:{}", ser.item_type.lib, ser.item_type.asset));
             ItemView {
                 id: it.id,
-                location: match it.location {
-                    Location::Backpack => "backpack",
-                    Location::Bank => "bank",
-                },
+                is_bank: it.location == Location::Bank,
                 is_weapon: ser.is_weapon,
                 levelable: ser.is_levelable(),
                 level: ser.stage.unwrap_or(0),
-                name: {
-                    let manu = ser.manufacturer_name().unwrap_or_default();
-                    let ty = ser.type_name().unwrap_or_else(|| {
-                        format!("type {}:{}", ser.item_type.lib, ser.item_type.asset)
-                    });
-                    format!("{manu} {ty}").trim().to_string()
-                },
+                name: format!("{manufacturer} {type_name}").trim().to_string(),
                 details,
+                type_name,
+                balance,
+                manufacturer,
                 is_weapon_set: (ser.is_weapon, ser.set),
                 parts,
             }
@@ -176,6 +180,7 @@ impl App {
                     part_catalog: Vec::new(),
                     part_catalog_key: None,
                     import_code: String::new(),
+                    show_bank: false,
                     name,
                     path,
                     save: s,
@@ -426,6 +431,7 @@ impl App {
             return;
         };
         let key = doc.items[idx].is_weapon_set;
+        let slot_name = bl2_save::slot_label(key.0, slot);
         if doc.part_catalog_key != Some(key) {
             doc.part_catalog = bl2_save::parts_catalog(key.0, key.1);
             doc.part_catalog_key = Some(key);
@@ -441,7 +447,7 @@ impl App {
         let mut close = false;
         let resp = egui::Modal::new(egui::Id::new("part_picker")).show(ctx, |ui| {
             ui.set_width(440.0);
-            ui.label(egui::RichText::new(format!("Slot {slot} — choose a part")).color(accent).strong());
+            ui.label(egui::RichText::new(format!("{slot_name} — choose a part")).color(accent).strong());
             let te = ui.add(
                 egui::TextEdit::singleline(&mut doc.part_filter)
                     .hint_text("type to search parts…")
@@ -597,7 +603,7 @@ fn items_tab(
         doc.item_level = doc.item_level.clamp(1, 127);
         if ui
             .button("Apply to all")
-            .on_hover_text("Sets every levelable item to this level. Locked ⚠ items are left alone.")
+            .on_hover_text("Sets every levelable item (both bags) to this level. Locked ⚠ items are left alone.")
             .clicked()
         {
             let lvl = doc.item_level;
@@ -608,16 +614,36 @@ fn items_tab(
     });
     ui.add_space(4.0);
 
+    // Backpack / Bank split — pick which bag to show.
+    let backpack_n = doc.items.iter().filter(|v| !v.is_bank).count();
+    let bank_n = doc.items.iter().filter(|v| v.is_bank).count();
+    ui.horizontal(|ui| {
+        theme::crate_icon(ui, 14.0, if doc.show_bank { text } else { accent });
+        if ui.selectable_label(!doc.show_bank, format!("Backpack ({backpack_n})")).clicked() {
+            doc.show_bank = false;
+        }
+        ui.add_space(8.0);
+        theme::crate_icon(ui, 14.0, if doc.show_bank { accent } else { text });
+        if ui.selectable_label(doc.show_bank, format!("Bank ({bank_n})")).clicked() {
+            doc.show_bank = true;
+        }
+    });
+    ui.add_space(2.0);
+
+    let show_bank = doc.show_bank;
+    if doc.items.iter().filter(|v| v.is_bank == show_bank).count() == 0 {
+        ui.weak(if show_bank { "Bank is empty." } else { "Backpack is empty." });
+    }
+
     let mut open_parts = None;
     let mut copy_code = None;
     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
         egui::Grid::new("items_grid")
-            .num_columns(6)
+            .num_columns(5)
             .spacing([16.0, 4.0])
             .striped(true)
             .show(ui, |ui| {
-                for v in &mut doc.items {
-                    ui.label(v.location);
+                for v in doc.items.iter_mut().filter(|v| v.is_bank == show_bank) {
                     let (kcol, kind) = if v.is_weapon { (accent, "weapon") } else { (text, "item") };
                     ui.label(egui::RichText::new(kind).color(kcol).strong());
                     if v.levelable {
@@ -686,20 +712,31 @@ fn rebuild_items_preserving_levels(doc: &mut Doc) {
 
 /// Render the open item's slot list. Each "change" opens the picker modal
 /// (rendered separately) for that slot. The actual swap happens in the modal.
+/// The item detail form: header (type/balance/manufacturer/level) plus a list of
+/// this item's part slots, each with its human name (see [`bl2_save::slot_label`])
+/// and a "change" button that opens the picker modal.
 fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     let Some(id) = doc.editing_parts else { return };
     let Some(idx) = doc.items.iter().position(|v| v.id == id) else {
         doc.editing_parts = None;
         return;
     };
-    let item_name = doc.items[idx].name.clone();
-    let slots: Vec<(usize, String)> =
-        doc.items[idx].parts.iter().map(|p| (p.slot, p.name.clone())).collect();
+    let v = &doc.items[idx];
+    let item_name = v.name.clone();
+    let is_weapon = v.is_weapon;
+    let (kind, type_name, balance, manufacturer, level) = (
+        if is_weapon { "Weapon" } else { "Item" },
+        v.type_name.clone(),
+        v.balance.clone(),
+        v.manufacturer.clone(),
+        v.level,
+    );
+    let slots: Vec<(usize, String)> = v.parts.iter().map(|p| (p.slot, p.name.clone())).collect();
 
     ui.add_space(6.0);
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(format!("Parts — {item_name}")).color(accent).strong());
+        ui.label(egui::RichText::new(format!("Details — {item_name}")).color(accent).strong());
         if ui.button("Close").clicked() {
             doc.editing_parts = None;
             doc.editing_part_slot = None;
@@ -708,13 +745,32 @@ fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     if doc.editing_parts.is_none() {
         return;
     }
+
+    // Read-only header: what this item is.
+    egui::Grid::new("item_header_grid").num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+        let field = |ui: &mut egui::Ui, k: &str, val: &str| {
+            ui.label(egui::RichText::new(k).color(accent));
+            ui.monospace(if val.is_empty() { "—" } else { val });
+            ui.end_row();
+        };
+        field(ui, "Kind", kind);
+        field(ui, "Type", &type_name);
+        field(ui, "Balance", &balance);
+        if !manufacturer.is_empty() {
+            field(ui, "Manufacturer", &manufacturer);
+        }
+        field(ui, "Level", &format!("{level}"));
+    });
+
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("Parts").color(accent).strong());
     ui.colored_label(
         theme::DANGER,
         "⚠ Changing parts can create items the game rejects — back up first and verify in-game.",
     );
     egui::Grid::new("parts_grid").num_columns(3).spacing([10.0, 4.0]).show(ui, |ui| {
         for (slot, name) in &slots {
-            ui.monospace(format!("slot {slot:>2}"));
+            ui.label(egui::RichText::new(bl2_save::slot_label(is_weapon, *slot)).strong());
             ui.monospace(name);
             if ui.small_button("change").clicked() {
                 doc.editing_part_slot = Some(*slot);

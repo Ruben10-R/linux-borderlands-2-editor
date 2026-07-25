@@ -323,6 +323,25 @@ pub struct PartOption {
     pub name: String,
 }
 
+/// Human name for part slot `slot` of a weapon or item.
+///
+/// Weapons have a fixed 11-slot layout, so every slot gets its real name.
+/// Items are heterogeneous (a shield, grenade mod and relic use slots 0–7 for
+/// different things), so only the tail — Material/Prefix/Title — is named; the
+/// rest are generic "Part N". Verified against real save0001 items.
+pub fn slot_label(is_weapon: bool, slot: usize) -> &'static str {
+    const WEAPON: [&str; 11] = [
+        "Body", "Grip", "Barrel", "Sight", "Stock", "Element", "Accessory 1",
+        "Accessory 2", "Material", "Prefix", "Title",
+    ];
+    const ITEM: [&str; 11] = [
+        "Part 1", "Part 2", "Part 3", "Part 4", "Part 5", "Part 6", "Part 7",
+        "Part 8", "Material", "Prefix", "Title",
+    ];
+    let table = if is_weapon { &WEAPON } else { &ITEM };
+    table.get(slot).copied().unwrap_or("Part")
+}
+
 /// Every available part (with a readable name) for weapons vs items in a given
 /// set — the choices for a parts picker. NOTE: not filtered by item compatibility,
 /// so arbitrary combinations can produce items the game rejects.
@@ -382,6 +401,21 @@ mod tests {
         assert_eq!(s.money(), 608);
         assert_eq!(s.eridium(), 0);
         assert_eq!(s.class_name().as_deref(), Some("Zer0 (Assassin)"));
+    }
+
+    #[test]
+    fn slot_labels_match_layout() {
+        // Weapons: fixed 11-slot layout, every slot named.
+        assert_eq!(slot_label(true, 0), "Body");
+        assert_eq!(slot_label(true, 2), "Barrel");
+        assert_eq!(slot_label(true, 10), "Title");
+        // Items: only the tail is reliably named across item types.
+        assert_eq!(slot_label(false, 8), "Material");
+        assert_eq!(slot_label(false, 9), "Prefix");
+        assert_eq!(slot_label(false, 10), "Title");
+        assert_eq!(slot_label(false, 0), "Part 1");
+        // Out of range is graceful.
+        assert_eq!(slot_label(true, 99), "Part");
     }
 
     #[test]
