@@ -20,11 +20,13 @@ mod error;
 mod gameinfo;
 mod items;
 mod levels;
+mod profile;
 mod proto;
 mod serial;
 mod stations;
 
 pub use levels::{level_for_xp, xp_for_level};
+pub use profile::ProfileFile;
 
 pub use customizations::Customization;
 pub use error::{Result, SaveError};

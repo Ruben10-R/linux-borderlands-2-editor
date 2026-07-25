@@ -21,3 +21,6 @@ samples/*.sav
 
 # Gibbed UI reference screenshots (copyrighted — local reference only)
 gibbed editor pictures/
+
+# profile.bin samples (personal, like .sav)
+samples/*.bin

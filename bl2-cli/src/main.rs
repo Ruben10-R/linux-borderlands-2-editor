@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bl2_save::{Location, SaveError, SaveFile};
+use bl2_save::{Location, ProfileFile, SaveError, SaveFile};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -94,6 +94,17 @@ enum Cmd {
         sav: PathBuf,
         head: String,
         skin: String,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Show account profile.bin info (Golden Keys, Badass Rank, tokens).
+    ProfileInfo {
+        profile: PathBuf,
+    },
+    /// Set SHiFT Golden Keys in a profile.bin (0–255).
+    SetGoldenKeys {
+        profile: PathBuf,
+        count: u8,
         #[command(flatten)]
         w: WriteOpts,
     },
@@ -271,6 +282,8 @@ fn run() -> Result<(), SaveError> {
         ),
         Cmd::Customizations { sav } => cmd_customizations(&sav),
         Cmd::SetHeadSkin { sav, head, skin, w } => cmd_set_head_skin(&sav, &head, &skin, w),
+        Cmd::ProfileInfo { profile } => cmd_profile_info(&profile),
+        Cmd::SetGoldenKeys { profile, count, w } => cmd_set_golden_keys(&profile, count, w),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
@@ -378,6 +391,38 @@ fn cmd_customizations(sav: &Path) -> Result<(), SaveError> {
             println!("  {:<28}  {}", c.name, c.path);
         }
     }
+    Ok(())
+}
+
+fn cmd_profile_info(profile: &Path) -> Result<(), SaveError> {
+    let p = ProfileFile::load(profile)?;
+    println!("== profile {} ==", profile.display());
+    println!("  golden keys : {}", p.golden_keys().map(|k| k.to_string()).unwrap_or_else(|| "0 (none)".into()));
+    println!("  badass rank : {}", p.badass_rank().map(|r| r.to_string()).unwrap_or_else(|| "?".into()));
+    println!("  badass tokens (unspent) : {}", p.badass_tokens().map(|t| t.to_string()).unwrap_or_else(|| "?".into()));
+    Ok(())
+}
+
+fn cmd_set_golden_keys(profile: &Path, count: u8, w: WriteOpts) -> Result<(), SaveError> {
+    let mut p = ProfileFile::load(profile)?;
+    let before = p.golden_keys().unwrap_or(0);
+    p.set_golden_keys(count)?;
+    let out = w.out.as_deref().unwrap_or(profile);
+    println!("== set golden keys ==");
+    println!("  input   : {}", profile.display());
+    println!("  keys    : {before} -> {count}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    p.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
     Ok(())
 }
 
