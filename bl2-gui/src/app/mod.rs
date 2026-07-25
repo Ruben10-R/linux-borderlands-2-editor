@@ -21,6 +21,7 @@ pub struct App {
     /// Web-only: file bytes picked by the browser Open dialog (async), consumed
     /// next frame. `Rc<RefCell<..>>` because wasm is single-threaded.
     #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::type_complexity)]
     pending_open: std::rc::Rc<std::cell::RefCell<Option<(String, Vec<u8>)>>>,
 }
 
@@ -925,7 +926,7 @@ impl App {
         let matches: Vec<usize> = lib
             .iter()
             .enumerate()
-            .filter(|(_, e)| want_cat.map_or(true, |c| e.category == c))
+            .filter(|(_, e)| want_cat.is_none_or(|c| e.category == c))
             .filter(|(_, e)| {
                 needle.is_empty()
                     || e.name.to_lowercase().contains(&needle)

@@ -1,0 +1,48 @@
+name: CI
+
+# Run on every push (any branch) and every pull request.
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: fmt · clippy · test · web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) + rustfmt/clippy/wasm
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # The native GUI links against OpenGL / X11 / Wayland / GTK (file dialogs).
+      - name: System libraries for the native GUI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libgtk-3-dev libxkbcommon-dev libwayland-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Format (rustfmt — the PHPCS equivalent)
+        run: cargo fmt --all --check
+
+      - name: Lint (clippy — the PHPStan equivalent, warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build (native — all crates incl. the desktop GUI, so it links)
+        run: cargo build --workspace
+
+      - name: Tests
+        run: cargo test --workspace --exclude bl2-gui
+
+      - name: Build (web / WASM)
+        run: cargo build -p bl2-gui --target wasm32-unknown-unknown

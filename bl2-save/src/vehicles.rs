@@ -75,7 +75,7 @@ fn db() -> &'static HashMap<String, Vec<VehicleSkin>> {
                             .collect()
                     })
                     .unwrap_or_default();
-                skins.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                skins.sort_by_key(|a| a.name.to_lowercase());
                 out.insert(token.clone(), skins);
             }
         }

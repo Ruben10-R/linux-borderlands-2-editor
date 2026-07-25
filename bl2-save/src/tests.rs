@@ -13,10 +13,10 @@ fn synthetic_proto() -> Vec<u8> {
     p.push(class.len() as u8);
     p.extend_from_slice(class);
     // field 2, wire 0: level = 4
-    p.push((2 << 3) | 0);
+    p.push(2 << 3);
     p.push(4);
     // field 3, wire 0: xp = 4288
-    p.push((3 << 3) | 0);
+    p.push(3 << 3);
     p.extend_from_slice(&[0xC0, 0x21]); // 4288 as varint
                                         // field 6, wire 2: packed [608, 0, 0]
     p.push((6 << 3) | 2);

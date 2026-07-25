@@ -175,10 +175,10 @@ fn huffman_encode(data: &[u8]) -> Vec<u8> {
 
     let mut heap = BinaryHeap::new();
     let mut seq = 0usize;
-    for b in 0..256 {
-        if freq[b] > 0 {
+    for (b, &count) in freq.iter().enumerate() {
+        if count > 0 {
             heap.push(Entry {
-                freq: freq[b],
+                freq: count,
                 seq,
                 node: Box::new(Node::Leaf(b as u8)),
             });

@@ -176,7 +176,7 @@ fn encode_currency(values: &[i64], packed: bool) -> Vec<u8> {
         out.extend_from_slice(&payload);
     } else {
         for &v in values {
-            encode_varint(&mut out, (CURRENCY_FIELD << 3) | 0); // tag
+            encode_varint(&mut out, CURRENCY_FIELD << 3); // tag
             encode_varint(&mut out, v as u64);
         }
     }

@@ -1,8 +1,10 @@
-# BL2 Save Editor
+# BL2 Save Editor  ·  rust-borderlands-2-editor
 
-A **Linux-native Borderlands 2 save editor**, written in Rust — not a port, no
-Wine / Mono / .NET. One `bl2-save` core library powers three frontends from the
-same code:
+[![CI](https://github.com/Ruben10-R/rust-borderlands-2-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/Ruben10-R/rust-borderlands-2-editor/actions/workflows/ci.yml)
+
+A **Borderlands 2 save editor written in Rust** — not a port, no Wine / Mono /
+.NET. It runs natively on **Linux and Windows** and in the browser. One
+`bl2-save` core library powers three frontends from the same code:
 
 - **Desktop app** (`bl2-editor`) — a native window; drag a file in, edit, Save.
 - **Web app** — the same editor in your browser via `docker compose up`.

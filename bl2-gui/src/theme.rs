@@ -16,17 +16,12 @@ const GEM: Color32 = Color32::from_rgb(0x9B, 0x5C, 0xF0);
 pub const DANGER: Color32 = Color32::from_rgb(0xF0, 0x54, 0x40);
 
 /// A selectable colour scheme (chrome only — semantic glyphs stay constant).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Theme {
+    #[default]
     VaultHunter,
     Eridium,
     Slaughter,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::VaultHunter
-    }
 }
 
 impl Theme {

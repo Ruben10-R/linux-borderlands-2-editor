@@ -74,7 +74,7 @@ pub fn for_class(class_def: &str, is_head: bool) -> Vec<Customization> {
         .filter(|c| c.is_head == is_head && c.classes.iter().any(|t| t == token))
         .cloned()
         .collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out
 }
 

@@ -1,11 +1,10 @@
 //! Backpack & bank capacity (SDU) editing.
 //!
 //! Capacity is stored in two places that must agree (per apocalyptech/Gibbed):
-//!  - the *size* itself — backpack in field 13's sub-field 1, bank in top-level
-//!    field 56;
-//!  - the *SDU upgrade count* in the black-market array (field 36, a packed list
-//!    of varints; index 7 = backpack, index 8 = bank).
-//! Sizes snap to the SDU grid: backpack = 12 + 3·sdu, bank = 6 + 2·sdu.
+//! the *size* itself (backpack in field 13's sub-field 1, bank in top-level field
+//! 56), and the *SDU upgrade count* in the black-market array (field 36, a packed
+//! list of varints; index 7 = backpack, index 8 = bank). Sizes snap to the SDU
+//! grid: backpack = 12 + 3·sdu, bank = 6 + 2·sdu.
 
 use crate::error::Result;
 use crate::proto;
@@ -131,7 +130,7 @@ mod tests {
         proto::emit_varint_field(&mut sizes, 1, 12);
         let mut m = Vec::new();
         proto::emit_wire2_field(&mut m, FIELD_SIZES, &sizes);
-        proto::emit_wire2_field(&mut m, FIELD_BLACK_MARKET, &vec![0u8; 9]);
+        proto::emit_wire2_field(&mut m, FIELD_BLACK_MARKET, &[0u8; 9]);
         proto::emit_varint_field(&mut m, FIELD_BANK_SIZE, 6);
         m
     }

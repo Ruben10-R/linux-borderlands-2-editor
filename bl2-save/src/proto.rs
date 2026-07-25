@@ -413,7 +413,7 @@ fn encode_currency(values: &[i64], packed: bool) -> Vec<u8> {
         out.extend_from_slice(&payload);
     } else {
         for &v in values {
-            encode_varint(&mut out, (FIELD_CURRENCY << 3) | 0);
+            encode_varint(&mut out, FIELD_CURRENCY << 3);
             encode_varint(&mut out, v as u64);
         }
     }
@@ -464,7 +464,7 @@ pub fn rewrite_varint_field(
         )));
     }
     let mut new_block = Vec::new();
-    encode_varint(&mut new_block, (number << 3) | 0);
+    encode_varint(&mut new_block, number << 3);
     encode_varint(&mut new_block, new_value as u64);
 
     let mut out = Vec::with_capacity(buf.len());
@@ -518,7 +518,7 @@ pub fn upsert_varint_field(buf: &[u8], fields: &[Field], number: u64, value: i64
     let mut done = false;
     for f in fields {
         if !done && f.number == number && f.wire_type == 0 {
-            encode_varint(&mut out, (number << 3) | 0);
+            encode_varint(&mut out, number << 3);
             encode_varint(&mut out, value as u64);
             done = true;
         } else {
@@ -526,7 +526,7 @@ pub fn upsert_varint_field(buf: &[u8], fields: &[Field], number: u64, value: i64
         }
     }
     if !done {
-        encode_varint(&mut out, (number << 3) | 0);
+        encode_varint(&mut out, number << 3);
         encode_varint(&mut out, value as u64);
     }
     out
