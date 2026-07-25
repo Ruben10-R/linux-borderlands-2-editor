@@ -800,7 +800,7 @@ fn fast_travel_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         }
     });
     ui.add_space(6.0);
-    ui.weak("Tick stations to unlock them, then Save/Download. Station data extracted from Gibbed's GameInfo (identifier data only).");
+    ui.weak("Tick stations to unlock them, then Save/Download.");
 }
 
 /// Raw tab: a read-only dump of every top-level protobuf field.
