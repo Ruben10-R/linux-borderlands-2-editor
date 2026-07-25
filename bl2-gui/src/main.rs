@@ -6,12 +6,13 @@
 fn main() -> eframe::Result {
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([480.0, 340.0])
-            .with_min_inner_size([360.0, 260.0]),
+            .with_inner_size([920.0, 700.0])
+            .with_min_inner_size([560.0, 420.0])
+            .with_title("BL2 Save Editor"),
         ..Default::default()
     };
     eframe::run_native(
-        "BL2 Save Viewer",
+        "BL2 Save Editor",
         native_options,
         Box::new(|cc| Ok(Box::new(bl2_gui::App::new(cc)))),
     )
