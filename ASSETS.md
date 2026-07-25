@@ -20,10 +20,10 @@ someone else's copyrighted work; this rule keeps us on the safe side regardless.
 - **Nominative naming.** We may call this "a save editor for Borderlands 2" to
   describe compatibility. We do **not** use the official stylised logo or imply
   endorsement by Gearbox/2K.
-- **Real in-game icons, when added, come from the user's own install at
-  runtime.** For a future item editor we may read item/character icons from the
-  user's *own* installed copy of the game at runtime (they own it) rather than
-  committing those files here. Nothing copyrighted enters this repository.
+- **We stick to original art.** We are not extracting or bundling game icons —
+  the original themes are enough. (If real in-game icons were ever wanted, the only
+  acceptable route would be reading them from the user's *own* installed copy at
+  runtime — never committing them here — but we are not pursuing that.)
 
 ## For contributors
 

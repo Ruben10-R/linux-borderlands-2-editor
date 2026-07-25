@@ -8,6 +8,7 @@ use crate::theme;
 pub struct App {
     loaded: Option<Loaded>,
     error: Option<String>,
+    theme: theme::Theme,
 }
 
 /// Everything we display for one loaded save (all read-only).
@@ -22,8 +23,9 @@ struct Loaded {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        theme::apply(&cc.egui_ctx);
-        Self::default()
+        let app = Self::default();
+        theme::apply(&cc.egui_ctx, app.theme);
+        app
     }
 
     /// Parse dropped bytes into the display model, or record the error.
@@ -89,25 +91,40 @@ impl eframe::App for App {
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
+            let accent = self.theme.accent();
+
             // Header: original emblem + wordmark.
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                theme::emblem(ui, 44.0);
+                theme::emblem(ui, 44.0, accent);
                 ui.add_space(10.0);
                 ui.vertical(|ui| {
                     ui.label(
                         egui::RichText::new("BL2 SAVE EDITOR")
-                            .color(theme::GOLD)
+                            .color(accent)
                             .size(24.0)
                             .strong(),
                     );
                     ui.label(
                         egui::RichText::new("read-only save viewer")
-                            .color(theme::CREAM)
+                            .color(self.theme.text())
                             .italics(),
                     );
                 });
             });
+
+            // Theme switcher.
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Theme:");
+                for t in theme::Theme::ALL {
+                    if ui.selectable_label(self.theme == t, t.label()).clicked() {
+                        self.theme = t;
+                        theme::apply(&ctx, t);
+                    }
+                }
+            });
+
             ui.add_space(4.0);
             ui.separator();
             ui.label("Drag a .sav file onto this window to inspect it.");
@@ -117,6 +134,7 @@ impl eframe::App for App {
                 ui.colored_label(theme::DANGER, format!("⚠ {err}"));
             }
 
+            let accent = self.theme.accent();
             match &self.loaded {
                 Some(s) => {
                     egui::Grid::new("general")
@@ -124,19 +142,19 @@ impl eframe::App for App {
                         .spacing([24.0, 8.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            field(ui, "File", &s.file);
-                            field(ui, "Class", &s.class);
-                            field(ui, "Level", &s.level.to_string());
-                            field(ui, "XP", &s.xp.to_string());
+                            field(ui, "File", &s.file, accent);
+                            field(ui, "Class", &s.class, accent);
+                            field(ui, "Level", &s.level.to_string(), accent);
+                            field(ui, "XP", &s.xp.to_string(), accent);
 
-                            key(ui, "Money");
+                            key(ui, "Money", accent);
                             ui.horizontal(|ui| {
                                 theme::coin(ui, 16.0);
                                 ui.monospace(s.money.to_string());
                             });
                             ui.end_row();
 
-                            key(ui, "Eridium");
+                            key(ui, "Eridium", accent);
                             ui.horizontal(|ui| {
                                 theme::eridium(ui, 16.0);
                                 ui.monospace(s.eridium.to_string());
@@ -154,14 +172,14 @@ impl eframe::App for App {
     }
 }
 
-/// A gold, bold key label (left column of the grid).
-fn key(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).color(theme::GOLD).strong());
+/// A bold accent-coloured key label (left column of the grid).
+fn key(ui: &mut egui::Ui, text: &str, accent: egui::Color32) {
+    ui.label(egui::RichText::new(text).color(accent).strong());
 }
 
 /// A full "key : value" grid row with a monospace value.
-fn field(ui: &mut egui::Ui, k: &str, value: &str) {
-    key(ui, k);
+fn field(ui: &mut egui::Ui, k: &str, value: &str, accent: egui::Color32) {
+    key(ui, k, accent);
     ui.monospace(value);
     ui.end_row();
 }
