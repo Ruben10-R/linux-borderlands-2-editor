@@ -302,6 +302,13 @@ impl eframe::App for App {
                                 .on_hover_text("Also level 'no-level' items (some class mods/relics).");
                             apply = ui.button("Apply").clicked();
                         });
+                        if doc.force_levels {
+                            ui.colored_label(
+                                theme::DANGER,
+                                "⚠ force can invalidate special/no-level items (some grenades, starter gear) — the game may drop them.",
+                            );
+                        }
+                        ui.weak("Note: edited items get unequipped in-game (their serial changes) — just re-equip.");
                     }
                     if apply {
                         self.apply_item_levels();

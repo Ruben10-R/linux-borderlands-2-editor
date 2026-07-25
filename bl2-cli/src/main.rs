@@ -51,7 +51,8 @@ enum Cmd {
     SetItemLevels {
         sav: PathBuf,
         level: i64,
-        /// Also level items the game marks as "no level" (grade ≤ 1).
+        /// Also level "no-level" items (grade ≤ 1). WARNING: can invalidate
+        /// special/starter items (some grenades) so the game drops them.
         #[arg(long)]
         force: bool,
         #[command(flatten)]
