@@ -10,6 +10,12 @@ sha1 = { workspace = true }
 crc32fast = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
+# Random Save GUID for freshly-created characters.
+getrandom = "0.2"
+
+# On web, getrandom needs the browser-crypto backend.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 # Test-only: the game uses a C LZO1x decompressor. We cross-check that our

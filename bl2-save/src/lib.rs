@@ -16,6 +16,7 @@
 mod capacity;
 mod catalog;
 mod codec;
+mod create;
 mod customizations;
 mod error;
 mod gameinfo;
@@ -33,6 +34,7 @@ pub use profile::ProfileFile;
 pub use vehicles::{VehicleFamily, VehicleSkin, FAMILIES as VEHICLE_FAMILIES};
 
 pub use catalog::*;
+pub use create::ImportGroup;
 pub use customizations::Customization;
 pub use error::{Result, SaveError};
 pub use item_codes::{code_library, library_categories, LibraryItem};

@@ -20,11 +20,27 @@ pub struct App {
     look: theme::Look,
     show_help: bool,
     tab: Tab,
+    /// New-character form: whether it's open, the chosen class (index into
+    /// `bl2_save::CLASSES`, `None` = not yet picked), and the typed name.
+    show_new: bool,
+    new_class: Option<usize>,
+    new_name: String,
+    /// Native: the auto-detected BL2 SaveData folder (if found), and whether the
+    /// user wants new characters written straight into it.
+    #[cfg(not(target_arch = "wasm32"))]
+    save_dir: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    use_game_folder: bool,
     /// Web-only: file bytes picked by the browser Open dialog (async), consumed
     /// next frame. `Rc<RefCell<..>>` because wasm is single-threaded.
     #[cfg(target_arch = "wasm32")]
     #[allow(clippy::type_complexity)]
     pending_open: std::rc::Rc<std::cell::RefCell<Option<(String, Vec<u8>)>>>,
+    /// Web-only: a source save picked for an Import (group + bytes), applied
+    /// next frame.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::type_complexity)]
+    pending_import: std::rc::Rc<std::cell::RefCell<Option<(bl2_save::ImportGroup, Vec<u8>)>>>,
 }
 
 /// A loaded `profile.bin` plus its editable scratch values.
@@ -217,10 +233,63 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
         .collect()
 }
 
+/// Build a `Doc` (parsed save + editable scratch values) from a `SaveFile`.
+/// Shared by file-loading and new-character creation.
+fn doc_from_save(s: SaveFile, name: String, path: Option<PathBuf>) -> Doc {
+    Doc {
+        char_name: s.name().unwrap_or_default(),
+        class_def: s.class_def().unwrap_or_default(),
+        head: s.wearing().first().cloned().unwrap_or_else(|| "0".into()),
+        skin: s.wearing().get(4).cloned().unwrap_or_else(|| "0".into()),
+        vehicle: bl2_save::VEHICLE_FAMILIES
+            .iter()
+            .map(|f| {
+                let sk = s.vehicle_family_skins(f.path);
+                (
+                    sk.first().cloned().unwrap_or_default(),
+                    sk.get(1).cloned().unwrap_or_default(),
+                )
+            })
+            .collect(),
+        skill_points: s.skill_points().unwrap_or(0),
+        specialist_skill_points: s.specialist_skill_points().unwrap_or(0),
+        playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
+        active_playthrough: s.active_playthrough(),
+        op_level: s.op_level().unwrap_or(0),
+        backpack_size: s.backpack_size().unwrap_or(12),
+        bank_size: s.bank_size(),
+        level: s.level().unwrap_or(0),
+        xp: s.xp().unwrap_or(0),
+        money: s.money(),
+        eridium: s.eridium(),
+        seraph: s.seraph(),
+        torgue: s.torgue(),
+        items: build_item_views(&s),
+        item_level: s.level().unwrap_or(50).clamp(1, 127),
+        editing_parts: None,
+        editing_part_slot: None,
+        part_filter: String::new(),
+        part_catalog: Vec::new(),
+        part_catalog_key: None,
+        import_code: String::new(),
+        show_library: false,
+        lib_filter: String::new(),
+        lib_category: 0,
+        lib_to_bank: false,
+        show_bank: false,
+        raw_filter: String::new(),
+        unlocked: s.visited_stations().into_iter().collect(),
+        name,
+        path,
+        save: s,
+    }
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
         // Restore the last-used theme + look (native: RON file; web: localStorage).
+        let mut stored_use_folder: Option<bool> = None;
         if let Some(storage) = cc.storage {
             if let Some(i) = eframe::get_value::<u8>(storage, "theme") {
                 app.theme = theme::Theme::from_index(i);
@@ -228,6 +297,14 @@ impl App {
             if let Some(i) = eframe::get_value::<u8>(storage, "look") {
                 app.look = theme::Look::from_index(i);
             }
+            stored_use_folder = eframe::get_value::<bool>(storage, "use_game_folder");
+        }
+        let _ = stored_use_folder; // consumed only on native
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            app.save_dir = crate::paths::detect_save_dir();
+            // Default to using a detected folder until the user says otherwise.
+            app.use_game_folder = stored_use_folder.unwrap_or(app.save_dir.is_some());
         }
         theme::apply(&cc.egui_ctx, app.theme, app.look);
         app
@@ -260,53 +337,7 @@ impl App {
         match SaveFile::from_bytes(bytes) {
             Ok(s) => {
                 self.profile = None;
-                self.doc = Some(Doc {
-                    char_name: s.name().unwrap_or_default(),
-                    class_def: s.class_def().unwrap_or_default(),
-                    head: s.wearing().first().cloned().unwrap_or_else(|| "0".into()),
-                    skin: s.wearing().get(4).cloned().unwrap_or_else(|| "0".into()),
-                    vehicle: bl2_save::VEHICLE_FAMILIES
-                        .iter()
-                        .map(|f| {
-                            let sk = s.vehicle_family_skins(f.path);
-                            (
-                                sk.first().cloned().unwrap_or_default(),
-                                sk.get(1).cloned().unwrap_or_default(),
-                            )
-                        })
-                        .collect(),
-                    skill_points: s.skill_points().unwrap_or(0),
-                    specialist_skill_points: s.specialist_skill_points().unwrap_or(0),
-                    playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
-                    active_playthrough: s.active_playthrough(),
-                    op_level: s.op_level().unwrap_or(0),
-                    backpack_size: s.backpack_size().unwrap_or(12),
-                    bank_size: s.bank_size(),
-                    level: s.level().unwrap_or(0),
-                    xp: s.xp().unwrap_or(0),
-                    money: s.money(),
-                    eridium: s.eridium(),
-                    seraph: s.seraph(),
-                    torgue: s.torgue(),
-                    items: build_item_views(&s),
-                    item_level: s.level().unwrap_or(50).clamp(1, 127),
-                    editing_parts: None,
-                    editing_part_slot: None,
-                    part_filter: String::new(),
-                    part_catalog: Vec::new(),
-                    part_catalog_key: None,
-                    import_code: String::new(),
-                    show_library: false,
-                    lib_filter: String::new(),
-                    lib_category: 0,
-                    lib_to_bank: false,
-                    show_bank: false,
-                    raw_filter: String::new(),
-                    unlocked: s.visited_stations().into_iter().collect(),
-                    name,
-                    path,
-                    save: s,
-                });
+                self.doc = Some(doc_from_save(s, name, path));
                 self.status = Some((false, "Loaded.".to_string()));
             }
             Err(e) => {
@@ -314,6 +345,129 @@ impl App {
                 self.status = Some((true, e.to_string()));
             }
         }
+    }
+
+    /// Create a fresh level-1 character from the new-character form and open it.
+    fn create_new_character(&mut self) {
+        let Some(idx) = self.new_class else {
+            self.status = Some((true, "Pick a class first.".into()));
+            return;
+        };
+        let (display, class_def) = bl2_save::CLASSES[idx];
+        // Default the name to the vault hunter's name (the part before " (").
+        let name = if self.new_name.trim().is_empty() {
+            display.split(" (").next().unwrap_or(display).to_string()
+        } else {
+            self.new_name.trim().to_string()
+        };
+        let save = SaveFile::new_character(class_def, &name);
+        self.profile = None;
+        // No path yet — a new character must be written via "Save As".
+        self.doc = Some(doc_from_save(save, "save0001.sav".to_string(), None));
+        self.show_new = false;
+        self.new_name.clear();
+        self.new_class = None;
+        self.tab = Tab::Character;
+        self.status = Some((
+            false,
+            format!("New {name} created — edit, then “Save As” into your save folder."),
+        ));
+    }
+
+    /// Copy an import group from `source` into the loaded character, rebuilding
+    /// the scratch views. Preserves the current file name/path.
+    fn apply_import(
+        &mut self,
+        source: &SaveFile,
+        group: bl2_save::ImportGroup,
+    ) -> Result<(), String> {
+        let old = self.doc.take().ok_or("no character loaded")?;
+        let (mut save, name, path) = (old.save, old.name, old.path);
+        let result = save.import_group(source, group).map_err(|e| e.to_string());
+        self.doc = Some(doc_from_save(save, name, path));
+        result
+    }
+
+    /// The new-character form (class picker + name), shown on the start screen.
+    fn new_character_form(&mut self, ui: &mut egui::Ui, accent: egui::Color32) {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("Create a new character")
+                .color(accent)
+                .size(18.0)
+                .strong(),
+        );
+        ui.weak("A fresh level-1 vault hunter (same as Gibbed's “New”). Then “Save As” into your save folder.");
+        ui.add_space(8.0);
+        egui::Grid::new("new_char_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                key(ui, "Class", accent);
+                let selected = self
+                    .new_class
+                    .map(|i| bl2_save::CLASSES[i].0)
+                    .unwrap_or("Choose a class…");
+                egui::ComboBox::from_id_salt("new_class")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        for (i, (display, _)) in bl2_save::CLASSES.iter().enumerate() {
+                            ui.selectable_value(&mut self.new_class, Some(i), *display);
+                        }
+                    });
+                ui.end_row();
+
+                key(ui, "Name", accent);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_name)
+                        .hint_text("(defaults to the character's name)"),
+                );
+                ui.end_row();
+            });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            let ready = self.new_class.is_some();
+            if ui
+                .add_enabled(
+                    ready,
+                    egui::Button::new(egui::RichText::new("Create character").strong()),
+                )
+                .clicked()
+            {
+                self.create_new_character();
+            }
+            if ui.button("Cancel").clicked() {
+                self.show_new = false;
+                self.new_name.clear();
+                self.new_class = None;
+                self.status = None;
+            }
+        });
+    }
+
+    /// The "Import from another save" buttons, shown under the General tab.
+    fn render_import_section(&mut self, ui: &mut egui::Ui, accent: egui::Color32) {
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new("Import from another save")
+                .color(accent)
+                .strong(),
+        );
+        ui.weak("Copy a group of data from a different character's .sav into this one.");
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for g in bl2_save::ImportGroup::ALL {
+                if ui
+                    .button(format!("Import {}", g.label()))
+                    .on_hover_text(g.detail())
+                    .clicked()
+                {
+                    self.import_dialog(g);
+                }
+            }
+        });
     }
 
     fn handle_dropped(&mut self, ctx: &egui::Context) {
@@ -414,8 +568,46 @@ impl App {
         }
         if let Some(pdoc) = self.profile.as_mut() {
             self.status = Some(persist_profile(pdoc));
-        } else if let Some(doc) = self.doc.as_mut() {
+            return;
+        }
+        // Native new character (no original file → no save+backup): route it
+        // into the detected BL2 folder, or fall back to a Save As dialog.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.doc.as_ref().is_some_and(|d| d.path.is_none()) {
+            self.save_new_character();
+            return;
+        }
+        if let Some(doc) = self.doc.as_mut() {
             self.status = Some(persist(doc));
+        }
+    }
+
+    /// Native: write a new character (no source path) into the detected BL2
+    /// SaveData folder, picking the next free `saveNNNN.sav` slot and stamping
+    /// the save id to match. Falls back to Save As if there's no folder / opt-out.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_new_character(&mut self) {
+        let dir = if self.use_game_folder {
+            self.save_dir.clone()
+        } else {
+            None
+        };
+        let Some(dir) = dir else {
+            self.save_as_dialog();
+            return;
+        };
+        let Some(doc) = self.doc.as_mut() else { return };
+        let slot = crate::paths::next_slot(&dir);
+        let file = crate::paths::slot_filename(slot);
+        let _ = doc.save.set_raw_varint(20, slot as i64); // save_game_id ↔ filename
+        let path = dir.join(&file);
+        match doc.save.save(&path, true) {
+            Ok(()) => {
+                doc.name = file;
+                doc.path = Some(path.clone());
+                self.status = Some((false, format!("Saved new character to {}", path.display())));
+            }
+            Err(e) => self.status = Some((true, format!("save failed: {e}"))),
         }
     }
 }
@@ -460,6 +652,38 @@ impl App {
             Err(e) => self.status = Some((true, format!("encode failed: {e}"))),
         }
     }
+
+    fn import_dialog(&mut self, group: bl2_save::ImportGroup) {
+        if self.doc.is_none() {
+            self.status = Some((true, "Load or create a character first.".into()));
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("BL2 character save", &["sav"])
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.status = Some((true, format!("could not read: {e}")));
+                return;
+            }
+        };
+        match SaveFile::from_bytes(&bytes) {
+            Ok(source) => match self.apply_import(&source, group) {
+                Ok(()) => {
+                    self.status = Some((
+                        false,
+                        format!("Imported {} from another save.", group.label()),
+                    ))
+                }
+                Err(e) => self.status = Some((true, format!("import failed: {e}"))),
+            },
+            Err(e) => self.status = Some((true, format!("not a character save: {e}"))),
+        }
+    }
 }
 
 // Web file open (browser picker → async read into a shared slot).
@@ -476,6 +700,24 @@ impl App {
                 let name = fh.file_name();
                 let bytes = fh.read().await;
                 *slot.borrow_mut() = Some((name, bytes));
+            }
+        });
+    }
+
+    fn import_dialog(&mut self, group: bl2_save::ImportGroup) {
+        if self.doc.is_none() {
+            self.status = Some((true, "Load or create a character first.".into()));
+            return;
+        }
+        let slot = self.pending_import.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(fh) = rfd::AsyncFileDialog::new()
+                .add_filter("BL2 character save", &["sav"])
+                .pick_file()
+                .await
+            {
+                let bytes = fh.read().await;
+                *slot.borrow_mut() = Some((group, bytes));
             }
         });
     }
@@ -629,12 +871,31 @@ impl eframe::App for App {
             theme::apply(&ctx, self.theme, self.look);
         }
 
+        // Ctrl+S / Cmd+S → Save (writes back + backup, or into the game folder
+        // for a new character).
+        let save_shortcut = ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S));
+        if save_shortcut && (self.doc.is_some() || self.profile.is_some()) {
+            self.save_current();
+        }
+
         // Web: consume a file picked asynchronously by the browser Open dialog.
         #[cfg(target_arch = "wasm32")]
         {
             let picked = self.pending_open.borrow_mut().take();
             if let Some((name, bytes)) = picked {
                 self.load(name, None, &bytes);
+            }
+            let imported = self.pending_import.borrow_mut().take();
+            if let Some((group, bytes)) = imported {
+                match SaveFile::from_bytes(&bytes) {
+                    Ok(source) => match self.apply_import(&source, group) {
+                        Ok(()) => {
+                            self.status = Some((false, format!("Imported {}.", group.label())))
+                        }
+                        Err(e) => self.status = Some((true, format!("import failed: {e}"))),
+                    },
+                    Err(e) => self.status = Some((true, format!("not a character save: {e}"))),
+                }
             }
         }
 
@@ -656,6 +917,10 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(panel_frame)
             .show_inside(ui, |ui| {
+              // Let the whole page scroll when it's taller than the window.
+              egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
                 theme::card(ui, look, |ui| {
                     let accent = self.theme.accent();
                     let text = self.theme.text();
@@ -694,11 +959,18 @@ impl eframe::App for App {
                     ui.add_space(4.0);
                     ui.separator();
 
-                    // Open (OS file dialog on native, browser picker on web).
+                    // Open / New (OS file dialog on native, browser picker on web).
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         if ui.button("📂  Open file…").clicked() {
                             self.open_dialog();
+                        }
+                        if ui
+                            .button(egui::RichText::new("✚  New character").strong())
+                            .clicked()
+                        {
+                            self.show_new = true;
+                            self.status = None;
                         }
                         ui.weak("· or drag a .sav / profile.bin onto the window");
                     });
@@ -706,13 +978,39 @@ impl eframe::App for App {
                     ui.separator();
 
                     if self.doc.is_none() && self.profile.is_none() {
-                        ui.add_space(8.0);
-                        ui.label("Open or drag a character .sav or your account profile.bin.");
-                        ui.add_space(2.0);
-                        ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
-                        if let Some((true, msg)) = &self.status {
+                        if self.show_new {
+                            self.new_character_form(ui, accent);
+                        } else {
                             ui.add_space(8.0);
-                            ui.colored_label(theme::DANGER, msg);
+                            ui.label("Open a character .sav / profile.bin, or create a brand-new character.");
+                            ui.add_space(2.0);
+                            ui.weak("profile.bin holds Golden Keys and Badass Rank (account-wide).");
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            ui.add_space(8.0);
+                            match &self.save_dir {
+                                Some(dir) => {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("BL2 save folder found:")
+                                                .color(accent)
+                                                .strong(),
+                                        );
+                                        ui.monospace(dir.display().to_string());
+                                    });
+                                }
+                                None => {
+                                    ui.weak(
+                                        "BL2 save folder not auto-detected — you'll choose where to save.",
+                                    );
+                                }
+                            }
+                        }
+                        if let Some((is_err, msg)) = &self.status {
+                            ui.add_space(8.0);
+                            let col = if *is_err { theme::DANGER } else { accent };
+                            ui.colored_label(col, msg);
                         }
                         return;
                     }
@@ -748,11 +1046,16 @@ impl eframe::App for App {
 
                     // Global actions (apply to the whole save, whatever tab is open).
                     ui.add_space(6.0);
+                    // A new character has no source file, so no in-place backup.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let is_new = self.doc.as_ref().is_some_and(|d| d.path.is_none());
                     let label = if cfg!(target_arch = "wasm32") {
                         "⬇  Download edited save"
                     } else {
                         "💾  Save (with backup)"
                     };
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let label = if is_new { "💾  Save new character" } else { label };
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new(label).strong()).clicked() {
                             self.save_current();
@@ -767,6 +1070,23 @@ impl eframe::App for App {
                             self.show_help = true;
                         }
                     });
+                    // New character (native): aim Save at the detected game folder.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if is_new {
+                        if let Some(dir) = self.save_dir.clone() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(
+                                    &mut self.use_game_folder,
+                                    "Save into the detected BL2 folder",
+                                );
+                                if self.use_game_folder {
+                                    ui.weak(format!("→ {}", dir.display()));
+                                }
+                            });
+                        } else {
+                            ui.weak("No BL2 folder detected — Save will ask where to write.");
+                        }
+                    }
                     if let Some((is_err, msg)) = &self.status {
                         let col = if *is_err { theme::DANGER } else { accent };
                         ui.colored_label(col, msg);
@@ -834,7 +1154,13 @@ impl eframe::App for App {
                     if let Some(s) = tab_status {
                         self.status = Some(s);
                     }
+
+                    // Gibbed-style "Import from another save" lives on General.
+                    if tab == Tab::General {
+                        self.render_import_section(ui, accent);
+                    }
                 });
+              });
             });
 
         // Parts picker modal — floats with full space; search keeps focus.
@@ -860,6 +1186,8 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "theme", &self.theme.index());
         eframe::set_value(storage, "look", &self.look.index());
+        #[cfg(not(target_arch = "wasm32"))]
+        eframe::set_value(storage, "use_game_folder", &self.use_game_folder);
     }
 }
 

@@ -149,7 +149,6 @@ The native GUI is excluded from the default cargo build (it needs GL/X11 libs);
 - `bl2-cli/` — the `bl2edit` command-line tool.
 - `bl2-gui/` — the egui/eframe app (native window + web/WASM canvas).
 - `samples/` — copies of real saves/profiles for testing (git-ignored; never the live files).
-- `PLAN.md` — the full implementation history and format notes.
 
 ---
 

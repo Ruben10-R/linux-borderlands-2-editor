@@ -2,6 +2,97 @@
 
 use super::*;
 
+fn hex_to_bytes(s: &str) -> Vec<u8> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+/// Golden test: `new_character` must reproduce a real Gibbed "New" save
+/// byte-for-byte (a Gaige/Mechromancer save exported from Gibbed 1.0.46), and
+/// the result must round-trip through our real codec (a game-loadable file).
+#[test]
+fn new_character_matches_gibbed() {
+    let expected = hex_to_bytes(concat!(
+        "0a3647445f54756c69705f4d656368726f6d616e6365722e4368617261637465",
+        "722e43686172436c6173735f4d656368726f6d616e6365721001180020002800",
+        "320d0000000000000000000000000038006a060800100018009a01250a054761",
+        "696765120808001000180020001a08080010001800200022080800100018002000",
+        "a00101a80100c80100f801009202140d550c61f5155ae8dc401d851edb2b25996",
+        "dffea9a02044e6f6e659a02009a02009a02009a02044e6f6e65a80200d00200e0",
+        "0201e80202800300880300900300980300b80300c00300",
+    ));
+    let guid = [
+        0x55, 0x0c, 0x61, 0xf5, 0x5a, 0xe8, 0xdc, 0x40, 0x85, 0x1e, 0xdb, 0x2b, 0x99, 0x6d, 0xff,
+        0xea,
+    ];
+    let save = SaveFile::new_character_with_guid(
+        "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer",
+        "Gaige",
+        &guid,
+    );
+    assert_eq!(
+        save.proto, expected,
+        "new_character must byte-match Gibbed's New output"
+    );
+
+    // Encode → decode through the real codec: proves it's a valid container.
+    let bytes = save.to_bytes().unwrap();
+    let reloaded = SaveFile::from_bytes(&bytes).unwrap();
+    assert_eq!(reloaded.proto, save.proto);
+    assert_eq!(reloaded.level(), Some(1));
+    assert_eq!(reloaded.name().as_deref(), Some("Gaige"));
+}
+
+/// A base-game class omits the DLC flags (fields 44/45); a DLC class includes
+/// them — matching what real saves contain.
+#[test]
+fn new_character_dlc_flags() {
+    let axton =
+        SaveFile::new_character("GD_Soldier.Character.CharClass_Soldier", "Axton").to_bytes();
+    assert!(axton.is_ok());
+    let axton = SaveFile::new_character("GD_Soldier.Character.CharClass_Soldier", "Axton");
+    let has_44 = crate::proto::parse_fields(&axton.proto)
+        .unwrap()
+        .iter()
+        .any(|f| f.number == 44);
+    assert!(!has_44, "base-game class must not emit is_dlc_player_class");
+
+    let krieg = SaveFile::new_character(
+        "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass",
+        "Krieg",
+    );
+    let has_44 = crate::proto::parse_fields(&krieg.proto)
+        .unwrap()
+        .iter()
+        .any(|f| f.number == 44);
+    assert!(has_44, "DLC class must emit is_dlc_player_class");
+}
+
+/// Importing a group swaps in the source's fields (skills here) and the result
+/// still round-trips through the codec.
+#[test]
+fn import_group_copies_fields() {
+    let source = SaveFile::from_bytes(include_bytes!("../../samples/save0001.sav")).unwrap();
+    let src_skill_count = crate::proto::parse_fields(&source.proto)
+        .unwrap()
+        .iter()
+        .filter(|f| f.number == 8)
+        .count();
+    assert!(src_skill_count > 0, "sample should have skills");
+
+    let mut fresh = SaveFile::new_character("GD_Assassin.Character.CharClass_Assassin", "Zero");
+    fresh.import_group(&source, ImportGroup::Skills).unwrap();
+    let got = crate::proto::parse_fields(&fresh.proto)
+        .unwrap()
+        .iter()
+        .filter(|f| f.number == 8)
+        .count();
+    assert_eq!(got, src_skill_count, "skills copied from source");
+    assert!(fresh.to_bytes().is_ok(), "still a valid save after import");
+}
+
 /// Build a tiny synthetic top-level protobuf: class(1,str), level(2), xp(3),
 /// packed currency(6)=[money, eridium, 0], plus an "unknown" field(9) we must
 /// never disturb.
