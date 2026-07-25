@@ -85,6 +85,18 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// List head/skin options for the save's class (name → asset path).
+    Customizations {
+        sav: PathBuf,
+    },
+    /// Set the equipped head and skin by asset path (see `customizations`).
+    SetHeadSkin {
+        sav: PathBuf,
+        head: String,
+        skin: String,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Dump every top-level protobuf field (read-only inspector).
     Raw {
         sav: PathBuf,
@@ -201,6 +213,8 @@ fn run() -> Result<(), SaveError> {
             |s| s.active_playthrough(),
             |s| s.set_active_playthrough(index.clamp(0, 2)),
         ),
+        Cmd::Customizations { sav } => cmd_customizations(&sav),
+        Cmd::SetHeadSkin { sav, head, skin, w } => cmd_set_head_skin(&sav, &head, &skin, w),
         Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
@@ -274,6 +288,40 @@ fn cmd_unlock_stations(sav: &Path, w: WriteOpts) -> Result<(), SaveError> {
         println!("  backup  : {}.bak", out.display());
     }
     warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_set_head_skin(sav: &Path, head: &str, skin: &str, w: WriteOpts) -> Result<(), SaveError> {
+    let mut s = SaveFile::load(sav)?;
+    s.set_wearing(head, skin)?;
+    let out = w.out.as_deref().unwrap_or(sav);
+    println!("== set head/skin ==");
+    println!("  head    : {head}");
+    println!("  skin    : {skin}");
+    if w.dry_run {
+        println!("  dry-run : nothing written");
+        return Ok(());
+    }
+    let backup = !w.no_backup;
+    let did_backup = backup && out.exists();
+    s.save(out, backup)?;
+    println!("  wrote   : {}", out.display());
+    if did_backup {
+        println!("  backup  : {}.bak", out.display());
+    }
+    warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_customizations(sav: &Path) -> Result<(), SaveError> {
+    let s = SaveFile::load(sav)?;
+    let class = s.class_def().unwrap_or_default();
+    for (label, is_head) in [("Heads", true), ("Skins", false)] {
+        println!("== {label} for {} ==", s.class_name().unwrap_or_default());
+        for c in bl2_save::customizations(&class, is_head) {
+            println!("  {:<28}  {}", c.name, c.path);
+        }
+    }
     Ok(())
 }
 

@@ -64,6 +64,9 @@ struct Doc {
     path: Option<PathBuf>,
     char_name: String,
     class_def: String,
+    /// Equipped head/skin paths (field 35 "wearing" indices 0 and 4).
+    head: String,
+    skin: String,
     skill_points: i64,
     playthroughs_completed: i64,
     active_playthrough: i64,
@@ -185,6 +188,8 @@ impl App {
                 self.doc = Some(Doc {
                     char_name: s.name().unwrap_or_default(),
                     class_def: s.class_def().unwrap_or_default(),
+                    head: s.wearing().first().cloned().unwrap_or_else(|| "0".into()),
+                    skin: s.wearing().get(4).cloned().unwrap_or_else(|| "0".into()),
                     skill_points: s.skill_points().unwrap_or(0),
                     playthroughs_completed: s.playthroughs_completed().unwrap_or(0),
                     active_playthrough: s.active_playthrough(),
@@ -281,6 +286,14 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     }
     if !doc.char_name.is_empty() {
         let _ = doc.save.set_name(&doc.char_name);
+    }
+    // Head/skin (field 35) — only rewrite if changed from what's on the save.
+    let wearing = doc.save.wearing();
+    let cur_head = wearing.first().cloned().unwrap_or_default();
+    let cur_skin = wearing.get(4).cloned().unwrap_or_default();
+    if (doc.head != cur_head || doc.skin != cur_skin) && !doc.head.is_empty() && !doc.skin.is_empty()
+    {
+        let _ = doc.save.set_wearing(&doc.head, &doc.skin);
     }
     // Fast-travel stations — only rewrite field 16 if the set actually changed.
     let current: std::collections::HashSet<String> =
@@ -569,6 +582,13 @@ fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
         });
         ui.end_row();
 
+        key(ui, "Head", accent);
+        customization_combo(ui, "head_combo", &doc.class_def, true, &mut doc.head);
+        ui.end_row();
+        key(ui, "Skin", accent);
+        customization_combo(ui, "skin_combo", &doc.class_def, false, &mut doc.skin);
+        ui.end_row();
+
         key(ui, "Level", accent);
         edit_number(ui, &mut doc.level, 1.0);
         ui.end_row();
@@ -581,6 +601,36 @@ fn character_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
     });
     ui.add_space(4.0);
     ui.weak("Changing class does not reset skills — level/skill mismatch may look odd in-game.");
+}
+
+/// A head/skin picker for the character's class. Writes the chosen asset path
+/// (or the stock "Default") into `current`. Head/skin apply on Save/Download.
+fn customization_combo(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    class_def: &str,
+    is_head: bool,
+    current: &mut String,
+) {
+    let display = if current == "0" || current.is_empty() || current.contains("_Default") {
+        "Default".to_string()
+    } else {
+        bl2_save::customization_name(current)
+            .map(str::to_string)
+            .unwrap_or_else(|| current.rsplit('.').next().unwrap_or(current).to_string())
+    };
+    egui::ComboBox::from_id_salt(id_salt).width(320.0).selected_text(display).show_ui(ui, |ui| {
+        if let Some(def) = bl2_save::default_customization(class_def, is_head) {
+            if ui.selectable_label(*current == def, "Default").clicked() {
+                *current = def;
+            }
+        }
+        for c in bl2_save::customizations(class_def, is_head) {
+            if ui.selectable_label(*current == c.path, &c.name).clicked() {
+                *current = c.path;
+            }
+        }
+    });
 }
 
 /// General tab: playthrough progression + read-only save info.
@@ -915,7 +965,7 @@ fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
     };
     head(ui, "What it edits");
     for s in [
-        "Character — name, class, level, XP, skill points",
+        "Character — name, class, head/skin, level, XP, skill points",
         "Currency — money, eridium, seraph crystals, torgue tokens",
         "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
         "Fast Travel — unlock stations (base game + DLC)",

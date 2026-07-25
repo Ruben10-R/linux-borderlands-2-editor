@@ -14,6 +14,7 @@
 //! ```
 
 mod codec;
+mod customizations;
 mod error;
 mod gameinfo;
 mod items;
@@ -21,6 +22,7 @@ mod proto;
 mod serial;
 mod stations;
 
+pub use customizations::Customization;
 pub use error::{Result, SaveError};
 pub use items::{Item, Location};
 pub use serial::{ItemSerial, PartRef};
@@ -204,12 +206,42 @@ impl SaveFile {
             .collect()
     }
 
+    /// The "wearing" list (field 35): index 0 = head path, index 4 = skin path,
+    /// with "0" placeholders between. Returns the raw strings.
+    pub fn wearing(&self) -> Vec<String> {
+        let Ok(fields) = self.fields() else { return Vec::new() };
+        fields
+            .iter()
+            .filter(|f| f.number == 35 && f.wire_type == 2)
+            .filter_map(|f| {
+                let c = proto::wire2_content(&self.proto, f).ok()?;
+                std::str::from_utf8(c).ok().map(str::to_string)
+            })
+            .collect()
+    }
+
     /// The station the character last fast-travelled to (field 17).
     pub fn last_station(&self) -> Option<String> {
         let fields = self.fields().ok()?;
         let f = fields.iter().find(|f| f.number == 17 && f.wire_type == 2)?;
         let c = proto::wire2_content(&self.proto, f).ok()?;
         std::str::from_utf8(c).ok().map(str::to_string)
+    }
+
+    /// Set the equipped head and skin paths (field 35 "wearing", indices 0 and 4),
+    /// preserving the "0" placeholders. Only field 35 changes.
+    pub fn set_wearing(&mut self, head: &str, skin: &str) -> Result<()> {
+        let fields = self.fields()?;
+        let mut list = self.wearing();
+        while list.len() < 5 {
+            list.push("0".to_string());
+        }
+        list[0] = head.to_string();
+        list[4] = skin.to_string();
+        let new = proto::set_repeated_string_field(&self.proto, &fields, 35, &list);
+        proto::only_fields_changed(&self.proto, &new, &[35])?;
+        self.proto = new;
+        Ok(())
     }
 
     /// Replace the unlocked fast-travel stations (field 16) with `resource_names`.
@@ -458,6 +490,22 @@ pub fn stations_catalog() -> &'static [Station] {
 /// Display name for a stored station `resource_name`, if known.
 pub fn station_display_name(resource_name: &str) -> Option<&'static str> {
     stations::display_name(resource_name)
+}
+
+/// Every head (`is_head=true`) or skin usable by the given class-definition path,
+/// for building a customization picker. See [`SaveFile::set_wearing`].
+pub fn customizations(class_def: &str, is_head: bool) -> Vec<Customization> {
+    customizations::for_class(class_def, is_head)
+}
+
+/// Display name for an equipped head/skin path, if known.
+pub fn customization_name(path: &str) -> Option<&'static str> {
+    customizations::name(path)
+}
+
+/// The stock "Default" head/skin path for a class (a safe reset).
+pub fn default_customization(class_def: &str, is_head: bool) -> Option<String> {
+    customizations::default_path(class_def, is_head)
 }
 
 /// Human name for part slot `slot` of a weapon or item.
@@ -779,5 +827,23 @@ mod tests {
             save.save_game_id(),
             save.time_played()
         );
+
+        // Head/skin (field 35 "wearing"): the catalog for this character's class
+        // is populated; equipping a catalog head+skin self-verifies and reads back.
+        if let Some(class_def) = save.class_def() {
+            let heads = customizations(&class_def, true);
+            let skins = customizations(&class_def, false);
+            assert!(!heads.is_empty() && !skins.is_empty(), "customization catalog for class");
+            let (h, s) = (heads[0].path.clone(), skins[0].path.clone());
+            let mut app = SaveFile::from_bytes(&save.to_bytes().unwrap()).unwrap();
+            app.set_wearing(&h, &s).expect("set wearing");
+            let _ = app.to_bytes().expect("wearing edit must self-verify");
+            let w = app.wearing();
+            assert_eq!(w.first().map(String::as_str), Some(h.as_str()), "head at index 0");
+            assert_eq!(w.get(4).map(String::as_str), Some(s.as_str()), "skin at index 4");
+            assert_eq!(app.money(), save.money(), "wearing edit must not touch money");
+            assert_eq!(app.name(), save.name(), "wearing edit must not touch name");
+            eprintln!("golden: equipped head {:?} + skin {:?}", heads[0].name, skins[0].name);
+        }
     }
 }
