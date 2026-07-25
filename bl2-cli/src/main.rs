@@ -132,13 +132,17 @@ fn cmd_items(sav: &Path) -> Result<(), SaveError> {
             gear += 1;
             "item"
         };
+        let manu = ser
+            .manufacturer_name()
+            .unwrap_or_else(|| format!("manu {}:{}", ser.manufacturer.lib, ser.manufacturer.asset));
+        let ty = ser
+            .type_name()
+            .unwrap_or_else(|| format!("type {}:{}", ser.item_type.lib, ser.item_type.asset));
         let parts = ser.parts.iter().filter(|p| p.is_some()).count();
         println!(
-            "  {loc:<8}  {kind:<6}  Lv {:<3}  type {}:{}  bal {}:{}  manu {}:{}  parts {parts}",
+            "  {loc:<8}  {kind:<6}  Lv {:<3}  {manu:<9} {ty:<22}  (bal {}:{}, {parts} parts)",
             ser.stage.unwrap_or(0),
-            ser.item_type.lib, ser.item_type.asset,
             ser.balance.lib, ser.balance.asset,
-            ser.manufacturer.lib, ser.manufacturer.asset,
         );
     }
     println!("  ---");
@@ -147,7 +151,7 @@ fn cmd_items(sav: &Path) -> Result<(), SaveError> {
         print!(", {placeholders} placeholder(s) skipped");
     }
     println!();
-    println!("  note: type/bal/manu are GameInfo db refs (lib:asset); human names need the GameInfo DB (future).");
+    println!("  note: manufacturer + type resolved from GameInfo; balance/part names are a future slice.");
     Ok(())
 }
 

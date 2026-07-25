@@ -13,4 +13,5 @@ sha1 = "0.10"
 crc32fast = "1.4"
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
+serde_json = "1"
 bl2-save = { path = "bl2-save" }

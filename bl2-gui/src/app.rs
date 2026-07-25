@@ -55,12 +55,13 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
                 },
                 is_weapon: ser.is_weapon,
                 level: ser.stage.unwrap_or(0),
-                refs: format!(
-                    "type {}:{}  bal {}:{}  manu {}:{}",
-                    ser.item_type.lib, ser.item_type.asset,
-                    ser.balance.lib, ser.balance.asset,
-                    ser.manufacturer.lib, ser.manufacturer.asset,
-                ),
+                refs: {
+                    let manu = ser.manufacturer_name().unwrap_or_default();
+                    let ty = ser.type_name().unwrap_or_else(|| {
+                        format!("type {}:{}", ser.item_type.lib, ser.item_type.asset)
+                    });
+                    format!("{manu} {ty}").trim().to_string()
+                },
             }
         })
         .collect()
@@ -306,7 +307,7 @@ impl eframe::App for App {
                                 });
                         });
                         ui.add_space(2.0);
-                        ui.weak("db refs (lib:asset) — human names need the GameInfo DB (future).");
+                        ui.weak("manufacturer + type from GameInfo; balance/part names coming later.");
                     });
                 }
             }

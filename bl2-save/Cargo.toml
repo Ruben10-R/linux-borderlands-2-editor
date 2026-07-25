@@ -9,6 +9,7 @@ lzokay-native = { workspace = true }
 sha1 = { workspace = true }
 crc32fast = { workspace = true }
 thiserror = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # Test-only: the game uses a C LZO1x decompressor. We cross-check that our

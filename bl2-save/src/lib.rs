@@ -15,6 +15,7 @@
 
 mod codec;
 mod error;
+mod gameinfo;
 mod items;
 mod proto;
 mod serial;

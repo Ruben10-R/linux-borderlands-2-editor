@@ -49,6 +49,17 @@ impl ItemSerial {
     pub fn is_placeholder(&self) -> bool {
         self.set == 255
     }
+
+    /// Manufacturer name (e.g. "Jakobs"), if resolvable from the GameInfo slice.
+    pub fn manufacturer_name(&self) -> Option<String> {
+        crate::gameinfo::name("Manufacturers", self.set, self.manufacturer.lib, self.manufacturer.asset)
+    }
+
+    /// Weapon/item type name (e.g. "Jakobs Pistol"), if resolvable.
+    pub fn type_name(&self) -> Option<String> {
+        let category = if self.is_weapon { "WeaponTypes" } else { "ItemTypes" };
+        crate::gameinfo::name(category, self.set, self.item_type.lib, self.item_type.asset)
+    }
 }
 
 // ---- keystream / rotation (symmetric XOR; rotate_right ↔ rotate_left) ----
