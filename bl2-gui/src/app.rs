@@ -200,6 +200,9 @@ fn persist(doc: &mut Doc) -> (bool, String) {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Re-apply every frame so our theme wins over eframe's system-theme
+        // following (otherwise the web build reverts to the browser's light mode).
+        theme::apply(&ctx, self.theme);
         self.handle_dropped(&ctx);
 
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
