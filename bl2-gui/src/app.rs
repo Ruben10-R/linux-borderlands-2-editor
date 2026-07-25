@@ -35,6 +35,8 @@ struct Doc {
     item_level: i64,
     /// Item id whose parts editor is open (None = closed).
     editing_parts: Option<usize>,
+    /// Which part slot's picker is expanded (None = none).
+    editing_part_slot: Option<usize>,
     part_filter: String,
     part_catalog: Vec<bl2_save::PartOption>,
     /// (is_weapon, set) the cached catalog was built for.
@@ -138,6 +140,7 @@ impl App {
                     items: build_item_views(&s),
                     item_level: s.level().unwrap_or(50).clamp(1, 127),
                     editing_parts: None,
+                    editing_part_slot: None,
                     part_filter: String::new(),
                     part_catalog: Vec::new(),
                     part_catalog_key: None,
@@ -414,6 +417,7 @@ impl eframe::App for App {
                     if let Some(oid) = open_parts {
                         doc.editing_parts =
                             if doc.editing_parts == Some(oid) { None } else { Some(oid) };
+                        doc.editing_part_slot = None;
                         doc.part_filter.clear();
                     }
                     ui.add_space(2.0);
@@ -466,8 +470,16 @@ fn parts_editor(
 
     ui.add_space(6.0);
     ui.separator();
+    // Clone what the render loop needs so it doesn't hold a borrow on doc.items.
+    let item_name = doc.items[idx].name.clone();
+    let slots: Vec<(usize, u32, u32, String)> = doc.items[idx]
+        .parts
+        .iter()
+        .map(|p| (p.slot, p.lib, p.asset, p.name.clone()))
+        .collect();
+
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(format!("Parts — {}", doc.items[idx].name)).color(accent).strong());
+        ui.label(egui::RichText::new(format!("Parts — {item_name}")).color(accent).strong());
         if ui.button("Close").clicked() {
             doc.editing_parts = None;
         }
@@ -479,36 +491,58 @@ fn parts_editor(
         theme::DANGER,
         "⚠ Changing parts can create items the game rejects — back up first and verify in-game.",
     );
-    ui.horizontal(|ui| {
-        ui.label("Filter:");
-        ui.text_edit_singleline(&mut doc.part_filter);
-    });
 
-    let needle = doc.part_filter.to_lowercase();
     let mut pending = None;
     egui::ScrollArea::vertical()
-        .max_height(260.0)
+        .max_height(320.0)
         .id_salt("parts_editor")
         .show(ui, |ui| {
-            for ps in &doc.items[idx].parts {
+            for (slot, lib, asset, name) in &slots {
+                let open = doc.editing_part_slot == Some(*slot);
                 ui.horizontal(|ui| {
-                    ui.monospace(format!("slot {:>2}", ps.slot));
-                    egui::ComboBox::from_id_salt(("part_combo", id, ps.slot))
-                        .selected_text(ps.name.clone())
-                        .width(280.0)
-                        .show_ui(ui, |ui| {
-                            for opt in doc.part_catalog.iter().filter(|o| {
-                                needle.is_empty() || o.name.to_lowercase().contains(&needle)
-                            }) {
-                                let selected = opt.lib == ps.lib && opt.asset == ps.asset;
-                                if ui.selectable_label(selected, &opt.name).clicked() {
-                                    pending = Some((id, ps.slot, opt.lib, opt.asset));
-                                }
-                            }
-                        });
+                    ui.monospace(format!("slot {slot:>2}"));
+                    ui.monospace(name);
+                    if ui.small_button(if open { "cancel" } else { "change" }).clicked() {
+                        if open {
+                            doc.editing_part_slot = None;
+                        } else {
+                            doc.editing_part_slot = Some(*slot);
+                            doc.part_filter.clear();
+                        }
+                    }
                 });
+
+                // Inline picker for the open slot — a normal search field + list
+                // (no ComboBox popup, so clicking the search never dismisses it).
+                if doc.editing_part_slot == Some(*slot) {
+                    ui.indent(("pick", *slot), |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut doc.part_filter)
+                                .hint_text("type to search parts…")
+                                .desired_width(300.0),
+                        );
+                        let needle = doc.part_filter.to_lowercase();
+                        egui::ScrollArea::vertical()
+                            .max_height(200.0)
+                            .id_salt(("picklist", *slot))
+                            .show(ui, |ui| {
+                                for opt in doc.part_catalog.iter().filter(|o| {
+                                    needle.is_empty() || o.name.to_lowercase().contains(&needle)
+                                }) {
+                                    let selected = opt.lib == *lib && opt.asset == *asset;
+                                    if ui.selectable_label(selected, &opt.name).clicked() {
+                                        pending = Some((id, *slot, opt.lib, opt.asset));
+                                    }
+                                }
+                            });
+                    });
+                }
             }
         });
+    // A pick closes the slot's picker.
+    if pending.is_some() {
+        doc.editing_part_slot = None;
+    }
     pending
 }
 
