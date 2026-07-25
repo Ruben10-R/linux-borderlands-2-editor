@@ -33,6 +33,12 @@ struct Doc {
     items: Vec<ItemView>,
     /// Target for the "set all levelable items" convenience button.
     item_level: i64,
+    /// Item id whose parts editor is open (None = closed).
+    editing_parts: Option<usize>,
+    part_filter: String,
+    part_catalog: Vec<bl2_save::PartOption>,
+    /// (is_weapon, set) the cached catalog was built for.
+    part_catalog_key: Option<(bool, u32)>,
 }
 
 /// One inventory row: `level` is an editable scratch value applied on save.
@@ -46,6 +52,17 @@ struct ItemView {
     name: String,
     /// Balance + parts breakdown, shown on hover.
     details: String,
+    is_weapon_set: (bool, u32),
+    /// Present part slots (editable).
+    parts: Vec<PartSlotView>,
+}
+
+/// One present part slot of an item, for the parts editor.
+struct PartSlotView {
+    slot: usize,
+    lib: u32,
+    asset: u32,
+    name: String,
 }
 
 fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
@@ -58,12 +75,26 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
             let balance = ser
                 .balance_name()
                 .unwrap_or_else(|| format!("bal {}:{}", ser.balance.lib, ser.balance.asset));
+            let part_names = ser.part_names();
             let mut details = format!("Balance: {balance}\nParts:");
-            for (i, part) in ser.part_names().iter().enumerate() {
+            for (i, part) in part_names.iter().enumerate() {
                 if let Some(n) = part {
                     details.push_str(&format!("\n  {i:>2}: {n}"));
                 }
             }
+            let parts = ser
+                .parts
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, p)| {
+                    p.map(|r| PartSlotView {
+                        slot,
+                        lib: r.lib,
+                        asset: r.asset,
+                        name: part_names[slot].clone().unwrap_or_else(|| format!("{}:{}", r.lib, r.asset)),
+                    })
+                })
+                .collect();
             ItemView {
                 id: it.id,
                 location: match it.location {
@@ -81,6 +112,8 @@ fn build_item_views(s: &SaveFile) -> Vec<ItemView> {
                     format!("{manu} {ty}").trim().to_string()
                 },
                 details,
+                is_weapon_set: (ser.is_weapon, ser.set),
+                parts,
             }
         })
         .collect()
@@ -104,6 +137,10 @@ impl App {
                     eridium: s.eridium(),
                     items: build_item_views(&s),
                     item_level: s.level().unwrap_or(50).clamp(1, 127),
+                    editing_parts: None,
+                    part_filter: String::new(),
+                    part_catalog: Vec::new(),
+                    part_catalog_key: None,
                     name,
                     path,
                     save: s,
@@ -341,9 +378,10 @@ impl eframe::App for App {
                     });
                     ui.add_space(4.0);
 
+                    let mut open_parts = None;
                     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                         egui::Grid::new("items_grid")
-                            .num_columns(4)
+                            .num_columns(5)
                             .spacing([16.0, 4.0])
                             .striped(true)
                             .show(ui, |ui| {
@@ -366,15 +404,29 @@ impl eframe::App for App {
                                         });
                                     }
                                     ui.monospace(&v.name).on_hover_text(&v.details);
+                                    if ui.small_button("Parts").clicked() {
+                                        open_parts = Some(v.id);
+                                    }
                                     ui.end_row();
                                 }
                             });
                     });
+                    if let Some(oid) = open_parts {
+                        doc.editing_parts =
+                            if doc.editing_parts == Some(oid) { None } else { Some(oid) };
+                        doc.part_filter.clear();
+                    }
                     ui.add_space(2.0);
                     ui.weak(
                         "Edit a level or use \u{201c}Apply to all\u{201d}, then Save/Download. Locked \u{26a0} items can't be leveled. \
-                         Edited items unequip in-game — re-equip. Hover an item for its balance + parts.",
+                         Click \u{201c}Parts\u{201d} to swap parts. Edited items unequip in-game — re-equip.",
                     );
+
+                    // Parts editor for the open item.
+                    if let Some((id, slot, lib, asset)) = parts_editor(doc, ui, accent) {
+                        let _ = doc.save.set_item_part(id, slot, lib, asset);
+                        doc.items = build_item_views(&doc.save);
+                    }
                 });
             }
         });
@@ -391,6 +443,73 @@ impl eframe::App for App {
             }
         }
     }
+}
+
+/// Parts editor for the currently-open item (`doc.editing_parts`). Returns a
+/// pending change `(item_id, slot, lib, asset)` when the user picks a new part.
+fn parts_editor(
+    doc: &mut Doc,
+    ui: &mut egui::Ui,
+    accent: egui::Color32,
+) -> Option<(usize, usize, u32, u32)> {
+    let id = doc.editing_parts?;
+    let Some(idx) = doc.items.iter().position(|v| v.id == id) else {
+        doc.editing_parts = None;
+        return None;
+    };
+    // Cache the (large) catalog until the edited item's category/set changes.
+    let key = doc.items[idx].is_weapon_set;
+    if doc.part_catalog_key != Some(key) {
+        doc.part_catalog = bl2_save::parts_catalog(key.0, key.1);
+        doc.part_catalog_key = Some(key);
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("Parts — {}", doc.items[idx].name)).color(accent).strong());
+        if ui.button("Close").clicked() {
+            doc.editing_parts = None;
+        }
+    });
+    if doc.editing_parts.is_none() {
+        return None;
+    }
+    ui.colored_label(
+        theme::DANGER,
+        "⚠ Changing parts can create items the game rejects — back up first and verify in-game.",
+    );
+    ui.horizontal(|ui| {
+        ui.label("Filter:");
+        ui.text_edit_singleline(&mut doc.part_filter);
+    });
+
+    let needle = doc.part_filter.to_lowercase();
+    let mut pending = None;
+    egui::ScrollArea::vertical()
+        .max_height(260.0)
+        .id_salt("parts_editor")
+        .show(ui, |ui| {
+            for ps in &doc.items[idx].parts {
+                ui.horizontal(|ui| {
+                    ui.monospace(format!("slot {:>2}", ps.slot));
+                    egui::ComboBox::from_id_salt(("part_combo", id, ps.slot))
+                        .selected_text(ps.name.clone())
+                        .width(280.0)
+                        .show_ui(ui, |ui| {
+                            for opt in doc.part_catalog.iter().filter(|o| {
+                                needle.is_empty() || o.name.to_lowercase().contains(&needle)
+                            }) {
+                                let selected = opt.lib == ps.lib && opt.asset == ps.asset;
+                                if ui.selectable_label(selected, &opt.name).clicked() {
+                                    pending = Some((id, ps.slot, opt.lib, opt.asset));
+                                }
+                            }
+                        });
+                });
+            }
+        });
+    pending
 }
 
 /// Contents of the install-instructions modal.
