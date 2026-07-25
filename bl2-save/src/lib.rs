@@ -88,6 +88,40 @@ impl SaveFile {
         proto::parse_fields(&self.proto)
     }
 
+    /// A read-only summary of every top-level protobuf field, in file order —
+    /// for the Raw inspector. Varints show their value; length-delimited fields
+    /// show a UTF-8 preview when printable, else a byte count.
+    pub fn raw_fields(&self) -> Result<Vec<RawField>> {
+        let fields = self.fields()?;
+        let mut out = Vec::with_capacity(fields.len());
+        for f in &fields {
+            let (kind, preview) = match f.wire_type {
+                0 => (
+                    "varint",
+                    proto::read_varint_value(&self.proto, f.val_start)
+                        .map(|v| v.to_string())
+                        .unwrap_or_default(),
+                ),
+                2 => {
+                    let content = proto::wire2_content(&self.proto, f)?;
+                    let printable = !content.is_empty()
+                        && content.iter().all(|&b| b == b'\t' || b == b'\n' || (0x20..0x7f).contains(&b));
+                    let preview = if printable {
+                        format!("{:?}", String::from_utf8_lossy(content))
+                    } else {
+                        format!("<{} bytes>", content.len())
+                    };
+                    ("bytes", preview)
+                }
+                1 => ("fixed64", format!("<{} bytes>", f.end - f.val_start)),
+                5 => ("fixed32", format!("<{} bytes>", f.end - f.val_start)),
+                _ => ("?", String::new()),
+            };
+            out.push(RawField { number: f.number, kind, len: f.end - f.val_start, preview });
+        }
+        Ok(out)
+    }
+
     /// Human-readable character/class name (e.g. "Zer0 (Assassin)").
     pub fn class_name(&self) -> Option<String> {
         let fields = self.fields().ok()?;
@@ -126,6 +160,28 @@ impl SaveFile {
         let inner = proto::wire2_content(&self.proto, f).ok()?;
         let ifields = proto::parse_fields(inner).ok()?;
         proto::read_string_field(inner, &ifields, 1)
+    }
+
+    /// The fast-travel stations this character has unlocked (protobuf field 16,
+    /// `repeated string visited_teleporters`), e.g. "SouthernShelfTown".
+    pub fn visited_stations(&self) -> Vec<String> {
+        let Ok(fields) = self.fields() else { return Vec::new() };
+        fields
+            .iter()
+            .filter(|f| f.number == 16 && f.wire_type == 2)
+            .filter_map(|f| {
+                let c = proto::wire2_content(&self.proto, f).ok()?;
+                std::str::from_utf8(c).ok().map(str::to_string)
+            })
+            .collect()
+    }
+
+    /// The station the character last fast-travelled to (field 17).
+    pub fn last_station(&self) -> Option<String> {
+        let fields = self.fields().ok()?;
+        let f = fields.iter().find(|f| f.number == 17 && f.wire_type == 2)?;
+        let c = proto::wire2_content(&self.proto, f).ok()?;
+        std::str::from_utf8(c).ok().map(str::to_string)
     }
 
     /// Full `currency_on_hand` array (index 0 = money, 1 = eridium, …).
@@ -314,6 +370,18 @@ pub const CLASSES: [(&str, &str); 6] = [
     ("Gaige (Mechromancer)", "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer"),
     ("Krieg (Psycho)", "GD_Lilac_PlayerClass.Character.CharClass_LilacPlayerClass"),
 ];
+
+/// A read-only view of one top-level protobuf field, for the Raw inspector.
+#[derive(Clone, Debug)]
+pub struct RawField {
+    pub number: u64,
+    /// Wire-type label: "varint", "bytes", "fixed32", "fixed64".
+    pub kind: &'static str,
+    /// Byte length of the field value.
+    pub len: usize,
+    /// Human preview: varint value, quoted string, or "<N bytes>".
+    pub preview: String,
+}
 
 /// One selectable part in a parts picker.
 #[derive(Clone, Debug)]
@@ -603,5 +671,12 @@ mod tests {
             assert_eq!(imp.money(), save.money(), "import must not touch money");
             eprintln!("golden: exported+reimported {} ({} chars)", code.len(), code.len());
         }
+
+        // Fast-travel stations decode as non-empty short names; raw inspector
+        // lists the class field (#1) among the top-level fields.
+        let stations = save.visited_stations();
+        assert!(stations.iter().all(|s| !s.is_empty()), "station names non-empty");
+        assert!(save.raw_fields().unwrap().iter().any(|f| f.number == 1), "raw lists field 1");
+        eprintln!("golden: {} stations, last = {:?}", stations.len(), save.last_station());
     }
 }

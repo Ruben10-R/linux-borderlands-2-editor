@@ -18,22 +18,35 @@ pub struct App {
     tab: Tab,
 }
 
-/// Which editor tab is shown (more will be added — Fast Travel, Vehicle, …).
+/// Which editor tab is shown.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Tab {
     #[default]
     Character,
     Currency,
     Items,
+    FastTravel,
+    Raw,
+    About,
 }
 
 impl Tab {
-    const ALL: [Tab; 3] = [Tab::Character, Tab::Currency, Tab::Items];
+    const ALL: [Tab; 6] = [
+        Tab::Character,
+        Tab::Currency,
+        Tab::Items,
+        Tab::FastTravel,
+        Tab::Raw,
+        Tab::About,
+    ];
     fn label(self) -> &'static str {
         match self {
             Tab::Character => "Character",
             Tab::Currency => "Currency",
             Tab::Items => "Items",
+            Tab::FastTravel => "Fast Travel",
+            Tab::Raw => "Raw",
+            Tab::About => "About",
         }
     }
 }
@@ -371,6 +384,9 @@ impl eframe::App for App {
                         Tab::Character => theme::head(ui, 16.0, col),
                         Tab::Currency => theme::coin(ui, 16.0),
                         Tab::Items => theme::crate_icon(ui, 16.0, col),
+                        Tab::FastTravel => theme::signpost(ui, 16.0, col),
+                        Tab::Raw => theme::page(ui, 16.0, col),
+                        Tab::About => theme::info(ui, 16.0, col),
                     }
                     let label = egui::RichText::new(t.label()).color(col).strong();
                     if ui.selectable_label(self.tab == t, label).clicked() {
@@ -395,6 +411,18 @@ impl eframe::App for App {
                     None
                 }
                 Tab::Items => items_tab(doc, ui, accent, text),
+                Tab::FastTravel => {
+                    fast_travel_tab(doc, ui, accent);
+                    None
+                }
+                Tab::Raw => {
+                    raw_tab(doc, ui, accent);
+                    None
+                }
+                Tab::About => {
+                    about_tab(ui, accent);
+                    None
+                }
             };
             if let Some(s) = tab_status {
                 self.status = Some(s);
@@ -695,6 +723,106 @@ fn items_tab(
     );
     parts_editor(doc, ui, accent);
     status
+}
+
+/// Fast Travel tab: a read-only view of unlocked stations + the current one.
+fn fast_travel_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    let stations = doc.save.visited_stations();
+    let last = doc.save.last_station();
+
+    ui.horizontal(|ui| {
+        theme::signpost(ui, 20.0, accent);
+        ui.label(egui::RichText::new("Fast Travel").color(accent).size(18.0).strong());
+    });
+    ui.add_space(4.0);
+    if let Some(l) = &last {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Current station:").color(accent));
+            ui.monospace(l);
+        });
+    }
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(format!("Unlocked stations ({})", stations.len())).color(accent).strong(),
+    );
+    if stations.is_empty() {
+        ui.weak("None recorded on this save.");
+    } else {
+        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+            for s in &stations {
+                let here = last.as_deref() == Some(s.as_str());
+                ui.monospace(if here { format!("★ {s}") } else { s.clone() });
+            }
+        });
+    }
+    ui.add_space(6.0);
+    ui.weak(
+        "Read-only for now. The game stores these as short names (e.g. \u{201c}SouthernShelfTown\u{201d}); \
+         unlocking every station cleanly needs a validated station-name dataset — a future addition.",
+    );
+}
+
+/// Raw tab: a read-only dump of every top-level protobuf field.
+fn raw_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
+    ui.horizontal(|ui| {
+        theme::page(ui, 20.0, accent);
+        ui.label(egui::RichText::new("Raw protobuf fields").color(accent).size(18.0).strong());
+    });
+    ui.weak("Read-only inspector — every top-level field of the decoded save, in file order.");
+    ui.add_space(4.0);
+    let fields = doc.save.raw_fields().unwrap_or_default();
+    egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+        egui::Grid::new("raw_grid").num_columns(4).spacing([14.0, 3.0]).striped(true).show(ui, |ui| {
+            for h in ["#", "type", "len", "value"] {
+                ui.label(egui::RichText::new(h).color(accent).strong());
+            }
+            ui.end_row();
+            for f in &fields {
+                ui.monospace(f.number.to_string());
+                ui.monospace(f.kind);
+                ui.monospace(f.len.to_string());
+                ui.monospace(&f.preview);
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// About tab: what this is, what it edits, credits, and the IP/asset policy.
+fn about_tab(ui: &mut egui::Ui, accent: egui::Color32) {
+    ui.horizontal(|ui| {
+        theme::emblem(ui, 28.0, accent);
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("BL2 Save Editor").color(accent).size(20.0).strong());
+    });
+    ui.add_space(6.0);
+    ui.label(
+        "A Linux-native, dependency-light Borderlands 2 save editor written in Rust. It runs as a \
+         web app (this page) and as a native desktop app from the same code — no Wine, Mono, or \
+         installed game files required.",
+    );
+    ui.add_space(8.0);
+
+    let head = |ui: &mut egui::Ui, s: &str| {
+        ui.label(egui::RichText::new(s).color(accent).strong());
+    };
+    head(ui, "What it edits");
+    for s in [
+        "Character — name, class, level, XP, skill points",
+        "Currency — money, eridium, seraph crystals, torgue tokens",
+        "Items — per-item level, parts, shareable BL2(…) codes, backpack ↔ bank",
+        "Fast Travel — unlocked stations (read-only)",
+    ] {
+        ui.label(format!("   •  {s}"));
+    }
+    ui.add_space(8.0);
+    head(ui, "Art & data");
+    ui.label(
+        "Every icon and theme is original art drawn in code — no Gearbox/2K assets are bundled. \
+         Item and part names come from open identifier data (zlib-licensed).",
+    );
+    ui.add_space(10.0);
+    ui.colored_label(theme::DANGER, "⚠ Always back up your save before editing.");
 }
 
 /// Rebuild the item views from the save after a structural change (e.g. import),

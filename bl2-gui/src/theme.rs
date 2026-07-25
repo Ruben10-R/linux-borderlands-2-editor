@@ -206,6 +206,61 @@ pub fn head(ui: &mut egui::Ui, size: f32, color: Color32) {
     p.add(Shape::convex_polygon(shoulders, color, Stroke::new(size * 0.09, OUTLINE)));
 }
 
+/// A signpost glyph for the Fast Travel tab (post + arrow sign).
+pub fn signpost(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    // Post.
+    p.line_segment(
+        [Pos2::new(c.x, c.y - size * 0.30), Pos2::new(c.x, c.y + size * 0.44)],
+        Stroke::new(size * 0.10, OUTLINE),
+    );
+    // Arrow sign pointing right.
+    let (t, b, l) = (c.y - size * 0.34, c.y - size * 0.06, c.x - size * 0.30);
+    let sign = vec![
+        Pos2::new(l, t),
+        Pos2::new(c.x + size * 0.20, t),
+        Pos2::new(c.x + size * 0.40, (t + b) * 0.5),
+        Pos2::new(c.x + size * 0.20, b),
+        Pos2::new(l, b),
+    ];
+    p.add(Shape::convex_polygon(sign, color, Stroke::new(size * 0.09, OUTLINE)));
+}
+
+/// A document/list glyph for the Raw inspector tab.
+pub fn page(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let (w, h) = (size * 0.28, size * 0.38);
+    let page = vec![
+        Pos2::new(c.x - w, c.y - h),
+        Pos2::new(c.x + w, c.y - h),
+        Pos2::new(c.x + w, c.y + h),
+        Pos2::new(c.x - w, c.y + h),
+    ];
+    p.add(Shape::convex_polygon(page, color, Stroke::new(size * 0.09, OUTLINE)));
+    for i in 0..3 {
+        let y = c.y - h * 0.4 + i as f32 * h * 0.42;
+        p.line_segment(
+            [Pos2::new(c.x - w * 0.55, y), Pos2::new(c.x + w * 0.55, y)],
+            Stroke::new(size * 0.06, OUTLINE),
+        );
+    }
+}
+
+/// An info "i" glyph for the About tab.
+pub fn info(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, p) = alloc(ui, size);
+    let c = rect.center();
+    let r = size * 0.42;
+    p.circle(c, r, color, Stroke::new(size * 0.10, OUTLINE));
+    p.circle_filled(Pos2::new(c.x, c.y - r * 0.42), size * 0.06, OUTLINE);
+    p.line_segment(
+        [Pos2::new(c.x, c.y - r * 0.08), Pos2::new(c.x, c.y + r * 0.45)],
+        Stroke::new(size * 0.12, OUTLINE),
+    );
+}
+
 /// A loot-crate glyph for the Items tab (uses the given color).
 pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
     let (rect, p) = alloc(ui, size);

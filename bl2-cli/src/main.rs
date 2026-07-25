@@ -85,6 +85,10 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
+    /// Dump every top-level protobuf field (read-only inspector).
+    Raw {
+        sav: PathBuf,
+    },
     /// Print shareable BL2(...) codes for every item (Gibbed-compatible).
     ExportCodes {
         sav: PathBuf,
@@ -163,6 +167,7 @@ fn run() -> Result<(), SaveError> {
         Cmd::SetItemLevels { sav, level, force, w } => cmd_set_item_levels(&sav, level, force, w),
         Cmd::PartCatalog { sav, id, filter } => cmd_part_catalog(&sav, id, &filter),
         Cmd::SetPart { sav, id, slot, lib, asset, w } => cmd_set_part(&sav, id, slot, lib, asset, w),
+        Cmd::Raw { sav } => cmd_raw(&sav),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
         Cmd::ImportCode { sav, code, bank, w } => cmd_import_code(&sav, &code, bank, w),
     }
@@ -210,6 +215,15 @@ fn cmd_set_part(
         println!("  backup  : {}.bak", out.display());
     }
     warn_if_steam_cloud(out);
+    Ok(())
+}
+
+fn cmd_raw(sav: &Path) -> Result<(), SaveError> {
+    let s = SaveFile::load(sav)?;
+    println!("== raw protobuf fields of {} ==", sav.display());
+    for f in s.raw_fields()? {
+        println!("  #{:<3} {:<8} len {:<6} {}", f.number, f.kind, f.len, f.preview);
+    }
     Ok(())
 }
 
