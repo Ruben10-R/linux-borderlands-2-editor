@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["bl2-save", "bl2-cli", "bl2-gui", "poc-roundtrip"]
+members = ["bl2-save", "bl2-cli", "bl2-gui"]
 # bl2-gui is excluded from the default set: `cargo build`/`test` (no -p) skips it,
 # because the NATIVE GUI needs system GL/X11 libs not present in the plain `rust:1`
 # image. Build it explicitly (`-p bl2-gui`) or via trunk/docker-compose (web/WASM).
-default-members = ["bl2-save", "bl2-cli", "poc-roundtrip"]
+default-members = ["bl2-save", "bl2-cli"]
 
 # Shared dependency versions, so every crate stays in lockstep.
 [workspace.dependencies]

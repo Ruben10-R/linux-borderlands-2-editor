@@ -1,5 +1,0 @@
-**/target
-.docker-cache
-**/.git
-**/*.sav.bak
-poc-roundtrip/roundtrip-out.sav

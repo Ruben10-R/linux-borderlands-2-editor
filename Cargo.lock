@@ -2739,15 +2739,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "poc-roundtrip"
-version = "0.2.0"
-dependencies = [
- "crc32fast",
- "minilzo-rs",
- "sha1",
-]
-
-[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

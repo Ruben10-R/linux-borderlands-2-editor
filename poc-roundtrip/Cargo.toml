@@ -1,9 +1,0 @@
-[package]
-name = "poc-roundtrip"
-version = "0.2.0"
-edition = "2021"
-
-[dependencies]
-minilzo-rs = "0.6"   # canonical MiniLZO (same LZO1x Gibbed/the game use)
-sha1 = "0.10"
-crc32fast = "1.4"

@@ -12,8 +12,7 @@ dist/
 # JetBrains RustRover
 .idea/
 
-# PoC output + save backups
-poc-roundtrip/roundtrip-out.sav
+# Save backups written next to an edited file
 **/*.sav.bak
 
 # Real save copies — keep personal saves (and Steam ID) out of the public repo
