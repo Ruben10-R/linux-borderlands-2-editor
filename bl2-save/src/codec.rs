@@ -234,16 +234,15 @@ fn huffman_encode(data: &[u8]) -> Vec<u8> {
 
 // ---------- checksums / endian helpers ----------
 
-/// Decompress an LZO1x stream, containing the decompressor's panics.
+/// Decompress an LZO1x stream, turning the decompressor's panics into errors.
 ///
-/// `lzokay-native` 0.1.0 (the newest release) panics with an arithmetic
-/// overflow when a back-reference points before the start of the output — i.e.
-/// on data that simply isn't a valid LZO stream. Since every input here is a
-/// file the user picked, that has to be an error, not a crash.
+/// `lzokay-native` 0.1.0 panics (overflow, or an out-of-range index) on data
+/// that isn't a valid LZO stream, and every input here is a file the user
+/// picked. No fixed release exists to upgrade to; a bounds-checked decompressor
+/// such as the `lzo` crate would remove the need for this.
 ///
-/// Caveat: on wasm32 panics abort rather than unwind, so this cannot catch
-/// there. The lasting fix is a bounds-checked decompressor (e.g. the `lzo`
-/// crate) — a codec swap worth doing deliberately, not as a drive-by.
+/// Does not catch on wasm32, where panics abort instead of unwinding. Callers
+/// check the hash first so junk never reaches here.
 pub(crate) fn lzo_decompress(src: &[u8], expected: usize, what: &str) -> Result<Vec<u8>> {
     match std::panic::catch_unwind(|| lzokay_native::decompress_all(src, Some(expected))) {
         Ok(Ok(out)) => Ok(out),

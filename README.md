@@ -108,15 +108,19 @@ Every write command takes optional `--out <file>` (write elsewhere),
 | `set-level <sav> <n>` · `set-xp <sav> <n>` | Level / XP |
 | `set-playthroughs <sav> <0-3>` | Playthroughs completed (1=TVHM, 2=UVHM) |
 | `set-playthrough <sav> <0-2>` | Current playthrough (0=NVHM,1=TVHM,2=UVHM) |
-| `set-op-level <sav> <n>` | Overpower level |
-| `set-specialist-points <sav> <n>` | Specialist skill points |
+| `set-op-level <sav> <0-8>` | Overpower level (needs lvl 72 + UVHM finished) |
+| `set-skill-points <sav> <n>` · `set-specialist-points <sav> <n>` | Skill points (main / specialist) |
 | `set-backpack <sav> <12-39>` · `set-bank <sav> <n>` | Inventory slots (SDU) |
 | `part-catalog <sav> <id> [filter]` · `set-part <sav> <id> <slot> <lib> <asset>` | Item parts |
-| `set-item-levels <sav> <lvl> [--force]` | Level every item |
+| `set-item-levels <sav> <lvl> [--force]` · `sync-item-levels <sav> [--force]` | Level every item (to a level / to the character's) |
 | `export-codes <sav>` · `import-code <sav> "BL2(...)" [--bank]` | Shareable item codes |
 | `customizations <sav>` · `set-head-skin <sav> <head> <skin>` | Equipped head/skin |
 | `unlock-stations <sav>` | Unlock all fast-travel stations |
 | `raw <sav>` | Dump every top-level field |
+| `set-save-id <sav> <n>` | Save-slot id — keep it equal to the `NNNN` in `saveNNNN.sav` |
+| `new <class> <name> <out.sav>` | Create a fresh level-1 character |
+| `import <sav> <source.sav> [--skills\|--missions\|--world\|--stats\|--all]` | Copy groups from another save |
+| `code-index <codes.txt>` | Decode a file of `BL2(...)` codes to JSON |
 
 ### Account profile
 | Command | What it does |
@@ -151,6 +155,11 @@ The native GUI is excluded from the default cargo build (it needs GL/X11 libs);
 byte-for-byte golden test against Gibbed's "New" output, item-serial packing,
 every edit guarded so it touches only its own protobuf fields, malformed-input
 handling, and a seeded fuzz sweep over both loaders.
+
+The GUI has its own tests, which CI runs separately (`cargo test -p bl2-gui
+--lib`) because the crate needs system GL/GTK libraries. They drive real egui
+widgets with no window, so the tabs and the theme are exercised over real save
+data — including the clamps each tab applies while drawing.
 
 Two tests are different — `golden_real_save_if_present` and
 `golden_real_profile_if_present`. They exercise nearly every edit path against a

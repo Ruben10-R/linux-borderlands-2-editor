@@ -660,10 +660,9 @@ pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
 mod tests {
     use super::*;
 
-    /// Drive real widget code with no window and no GPU. `Context::run_ui` hands
-    /// back a live `Ui`, so the drawing code executes for real; the returned
-    /// height is how much space the content actually laid out into, which is our
-    /// proxy for "something was rendered".
+    /// Drive real widget code with no window and no GPU. Returns the closure's
+    /// value and the height the content laid out into, which stands in for
+    /// "something was drawn".
     fn headless<R>(f: impl FnOnce(&mut egui::Ui) -> R) -> (R, f32) {
         let ctx = egui::Context::default();
         let mut f = Some(f);

@@ -898,11 +898,9 @@ mod tests {
 
     /// Run a tab against a real egui `Ui`, with no window and no GPU.
     ///
-    /// The widget code executes in full — grids, combos, scroll areas, drag
-    /// values — so anything that would panic on real save data (bad indexing,
-    /// a stray unwrap, broken geometry) fails the calling test. What the frame
-    /// *looks* like isn't asserted; the checks below use the state each tab
-    /// leaves behind, which is the part that reaches the save file.
+    /// The widget code executes in full, so anything that would panic on real
+    /// save data fails the calling test. Nothing here asserts what the frame
+    /// looks like; the checks below use the state each tab leaves behind.
     fn headless<R>(f: impl FnOnce(&mut egui::Ui) -> R) -> R {
         let ctx = egui::Context::default();
         let mut f = Some(f);

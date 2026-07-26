@@ -199,10 +199,9 @@ fn add_items_from_codes_counts_successes_and_failures() {
     assert_eq!(s2.add_items_from_codes("nothing here", false), (0, 0));
 }
 
-/// `describe_code` classifies each category. The library's own `category` field
-/// was produced by this same function, so this pins the behaviour rather than
-/// proving it independently — the value is catching a regression in the
-/// non-weapon branches, which nothing else exercises.
+/// `describe_code` classifies every category. The library's `category` field came
+/// from this same function, so this pins the behaviour rather than proving it
+/// independently; the non-weapon branches have no other coverage.
 #[test]
 fn describe_code_classifies_every_category() {
     for category in library_categories() {
@@ -423,11 +422,8 @@ fn set_item_part_validates_ranges() {
     );
 }
 
-/// Junk is turned away by the SHA1 gate before it can reach the decompressor.
-///
-/// `lzokay-native` panics on some malformed LZO streams. On native that panic is
-/// contained, but on wasm32 panics abort, so the web build would die. Rejecting
-/// on the hash first is what makes arbitrary files safe to open everywhere.
+/// Junk fails the hash before it can reach the decompressor, which is what makes
+/// arbitrary files safe to open (see `codec::lzo_decompress`).
 #[test]
 fn junk_is_rejected_before_it_reaches_the_decompressor() {
     for len in [24usize, 64, 512, 4096] {
@@ -464,12 +460,8 @@ fn a_valid_hash_over_a_corrupt_body_still_errors() {
     );
 }
 
-/// A file whose hash is right but whose inner CRC disagrees is refused.
-///
-/// This is the one checksum the SHA1 gate can't speak for: the CRC lives inside
-/// the compressed block and covers the protobuf, so it has to be re-checked
-/// after decoding. Built by patching the stored CRC of a real save and
-/// re-sealing the container so the outer hash stays valid.
+/// A file whose hash is right but whose inner CRC disagrees is refused. The CRC
+/// sits inside the compressed block, so the hash gate can't speak for it.
 #[test]
 fn crc_mismatch_is_rejected() {
     use sha1::{Digest, Sha1};
@@ -505,11 +497,7 @@ fn crc_mismatch_is_rejected() {
     }
 }
 
-/// Deterministic fuzz sweep: no byte string may crash the loaders.
-///
-/// This is the regression net for the whole "corrupt file panics instead of
-/// erroring" class — including a panic that lived in the LZO decompressor
-/// rather than in our own code.
+/// Deterministic fuzz sweep: no byte string may crash either loader.
 #[test]
 fn arbitrary_bytes_never_crash_the_loaders() {
     // xorshift64* — a fixed seed keeps failures reproducible.
