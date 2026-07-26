@@ -655,3 +655,182 @@ pub fn crate_icon(ui: &mut egui::Ui, size: f32, color: Color32) {
         Stroke::new(1.0_f32, OUTLINE),
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drive real widget code with no window and no GPU. `Context::run_ui` hands
+    /// back a live `Ui`, so the drawing code executes for real; the returned
+    /// height is how much space the content actually laid out into, which is our
+    /// proxy for "something was rendered".
+    fn headless<R>(f: impl FnOnce(&mut egui::Ui) -> R) -> (R, f32) {
+        let ctx = egui::Context::default();
+        let mut f = Some(f);
+        let (mut out, mut used) = (None, 0.0);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            if let Some(f) = f.take() {
+                out = Some(f(ui));
+            }
+            used = ui.min_rect().height();
+        });
+        (out.expect("the ui closure ran"), used)
+    }
+
+    #[test]
+    fn theme_and_look_indices_round_trip() {
+        // The index is what gets persisted, so it must survive a restart.
+        for t in Theme::ALL {
+            assert!(Theme::from_index(t.index()) == t, "theme index round-trips");
+            assert!(!t.label().is_empty());
+        }
+        // An index from a future or older build falls back instead of panicking.
+        let _ = Theme::from_index(200);
+
+        for l in [Look::Classic, Look::Modern] {
+            assert!(Look::from_index(l.index()) == l, "look index round-trips");
+            assert!(l.other() != l, "other() is the opposite look");
+            assert!(l.other().other() == l, "other() is its own inverse");
+            assert!(!l.label().is_empty());
+        }
+        let _ = Look::from_index(200);
+    }
+
+    #[test]
+    fn every_palette_is_opaque_and_distinct() {
+        let mut accents = Vec::new();
+        for t in Theme::ALL {
+            for (what, c) in [
+                ("accent", t.accent()),
+                ("text", t.text()),
+                ("backdrop", t.backdrop()),
+            ] {
+                assert_eq!(c.a(), 255, "{} {what} must be opaque", t.label());
+            }
+            // Text has to read against the backdrop, so they can't be equal.
+            assert!(t.text() != t.backdrop(), "{}: text vs backdrop", t.label());
+            accents.push(t.accent().to_array());
+        }
+        let unique: std::collections::HashSet<_> = accents.iter().collect();
+        assert_eq!(
+            unique.len(),
+            Theme::ALL.len(),
+            "each theme has its own accent"
+        );
+    }
+
+    #[test]
+    fn mix_and_lighten_hit_their_endpoints() {
+        let a = Color32::from_rgb(0, 40, 80);
+        let b = Color32::from_rgb(200, 100, 20);
+        assert_eq!(mix(a, b, 0.0), a, "t=0 is the first colour");
+        assert_eq!(mix(a, b, 1.0), b, "t=1 is the second");
+        let m = mix(a, b, 0.5);
+        assert!(m.r() > a.r() && m.r() < b.r(), "halfway lands between");
+        assert_eq!(lighten(a, 0.0), a, "lighten by 0 is a no-op");
+        assert_eq!(lighten(a, 1.0), Color32::WHITE, "lighten by 1 is white");
+        assert!(lighten(a, 0.5).r() > a.r(), "lightening raises channels");
+    }
+
+    #[test]
+    fn apply_sets_the_palette_for_every_theme_and_look() {
+        for t in Theme::ALL {
+            for l in [Look::Classic, Look::Modern] {
+                let ctx = egui::Context::default();
+                apply(&ctx, t, l);
+                let v = ctx.global_style().visuals.clone();
+                assert!(v.dark_mode, "{} stays a dark theme", t.label());
+                assert_eq!(v.hyperlink_color, t.accent(), "{} accent", t.label());
+                assert_eq!(
+                    v.override_text_color,
+                    Some(t.text()),
+                    "{} text colour",
+                    t.label()
+                );
+                // apply() runs every frame, so it must be stable, not cumulative.
+                let before = ctx.global_style().visuals.window_fill;
+                apply(&ctx, t, l);
+                assert_eq!(
+                    ctx.global_style().visuals.window_fill,
+                    before,
+                    "apply is idempotent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn modern_look_raises_the_surface_above_classic() {
+        let t = Theme::ALL[0];
+        let fill = |l| {
+            let ctx = egui::Context::default();
+            apply(&ctx, t, l);
+            ctx.global_style().visuals.window_fill
+        };
+        let (classic, modern) = (fill(Look::Classic), fill(Look::Modern));
+        assert!(classic != modern, "Modern elevates the card surface");
+        assert!(
+            modern.r() > classic.r(),
+            "Modern's surface is lighter than the flat ink"
+        );
+    }
+
+    /// A glyph that takes a colour, and one that carries a fixed semantic colour.
+    type Glyph = fn(&mut egui::Ui, f32, Color32);
+    type FixedGlyph = fn(&mut egui::Ui, f32);
+
+    #[test]
+    fn every_glyph_lays_out_at_any_size() {
+        // The glyphs are hand-drawn in code, so the geometry maths has to hold up
+        // at small and large sizes without panicking or allocating nothing.
+        let colour = Color32::from_rgb(200, 180, 40);
+        for size in [8.0_f32, 16.0, 44.0, 200.0] {
+            let coloured: [(&str, Glyph); 8] = [
+                ("emblem", emblem),
+                ("head", head),
+                ("wheel", wheel),
+                ("flag", flag),
+                ("signpost", signpost),
+                ("page", page),
+                ("info", info),
+                ("crate_icon", crate_icon),
+            ];
+            for (name, draw) in coloured {
+                let (_, used) = headless(|ui| draw(ui, size, colour));
+                assert!(used >= size, "{name} at {size} allocated {used}");
+            }
+            let plain: [(&str, FixedGlyph); 4] = [
+                ("coin", coin),
+                ("eridium", eridium),
+                ("seraph", seraph),
+                ("torgue", torgue),
+            ];
+            for (name, draw) in plain {
+                let (_, used) = headless(|ui| draw(ui, size));
+                assert!(used >= size, "{name} at {size} allocated {used}");
+            }
+        }
+    }
+
+    #[test]
+    fn card_passes_its_value_through_in_both_looks() {
+        for l in [Look::Classic, Look::Modern] {
+            let (value, used) = headless(|ui| {
+                card(ui, l, |ui| {
+                    ui.label("content");
+                    42
+                })
+            });
+            assert_eq!(value, 42, "card returns the closure's value");
+            assert!(used > 0.0, "card laid its content out");
+        }
+    }
+
+    #[test]
+    fn fab_renders_and_reports_no_click_without_input() {
+        for l in [Look::Classic, Look::Modern] {
+            let (clicked, _) = headless(|ui| fab(ui.ctx(), l, Color32::from_rgb(245, 177, 30)));
+            assert!(!clicked, "no pointer input means no click");
+        }
+    }
+}

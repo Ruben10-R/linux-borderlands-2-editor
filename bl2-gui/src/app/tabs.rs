@@ -888,3 +888,287 @@ pub(super) fn parts_editor(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ACCENT: egui::Color32 = egui::Color32::from_rgb(245, 177, 30);
+    const TEXT: egui::Color32 = egui::Color32::from_rgb(230, 226, 214);
+
+    /// Run a tab against a real egui `Ui`, with no window and no GPU.
+    ///
+    /// The widget code executes in full — grids, combos, scroll areas, drag
+    /// values — so anything that would panic on real save data (bad indexing,
+    /// a stray unwrap, broken geometry) fails the calling test. What the frame
+    /// *looks* like isn't asserted; the checks below use the state each tab
+    /// leaves behind, which is the part that reaches the save file.
+    fn headless<R>(f: impl FnOnce(&mut egui::Ui) -> R) -> R {
+        let ctx = egui::Context::default();
+        let mut f = Some(f);
+        let mut out = None;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            if let Some(f) = f.take() {
+                out = Some(f(ui));
+            }
+        });
+        out.expect("the ui closure ran")
+    }
+
+    /// A Gaige carrying real items in both bags, so the item paths have data.
+    fn doc_with_items() -> Doc {
+        let mut save = SaveFile::new_character(
+            "GD_Tulip_Mechromancer.Character.CharClass_Mechromancer",
+            "Gaige",
+        );
+        for e in bl2_save::code_library().iter().take(4) {
+            save.add_item_from_code(&e.code, false).unwrap();
+        }
+        save.add_item_from_code(&bl2_save::code_library()[4].code, true)
+            .unwrap();
+        doc_from_save(save, "save0001.sav".to_string(), None)
+    }
+
+    #[test]
+    fn every_tab_renders_over_real_save_data() {
+        let mut doc = doc_with_items();
+        let items_before = doc.items.len();
+        headless(|ui| character_tab(&mut doc, ui, ACCENT));
+        headless(|ui| general_tab(&mut doc, ui, ACCENT));
+        headless(|ui| currency_tab(&mut doc, ui, ACCENT));
+        headless(|ui| vehicle_tab(&mut doc, ui, ACCENT));
+        headless(|ui| fast_travel_tab(&mut doc, ui, ACCENT));
+        headless(|ui| raw_tab(&mut doc, ui, ACCENT));
+        headless(|ui| about_tab(ui, ACCENT));
+        let status = headless(|ui| items_tab(&mut doc, ui, ACCENT, TEXT));
+
+        assert!(status.is_none(), "no status without interaction");
+        assert_eq!(doc.items.len(), items_before, "no items gained or lost");
+        assert_eq!(doc.char_name, "Gaige", "the name survived a render pass");
+        assert!(doc.save.to_bytes().is_ok(), "the save is still encodable");
+    }
+
+    #[test]
+    fn tabs_render_on_a_character_with_no_items() {
+        // The empty-backpack branches have to hold up too.
+        let mut doc = doc_from_save(
+            SaveFile::new_character("GD_Soldier.Character.CharClass_Soldier", "Axton"),
+            "save0002.sav".to_string(),
+            None,
+        );
+        assert!(doc.items.is_empty(), "a fresh character has no items");
+        let status = headless(|ui| items_tab(&mut doc, ui, ACCENT, TEXT));
+        assert!(status.is_none());
+        headless(|ui| character_tab(&mut doc, ui, ACCENT));
+        headless(|ui| raw_tab(&mut doc, ui, ACCENT));
+        headless(|ui| vehicle_tab(&mut doc, ui, ACCENT));
+        headless(|ui| fast_travel_tab(&mut doc, ui, ACCENT));
+        assert!(doc.items.is_empty(), "still no items");
+    }
+
+    #[test]
+    fn rendering_clamps_out_of_range_scratch_values() {
+        // The tabs clamp as they draw, so a nonsense value can't reach the save.
+        let mut doc = doc_with_items();
+        doc.op_level = 99;
+        doc.playthroughs_completed = 9;
+        doc.backpack_size = 9_999;
+        doc.bank_size = 9_999;
+        headless(|ui| general_tab(&mut doc, ui, ACCENT));
+        assert_eq!(doc.op_level, MAX_OP_LEVEL, "OP clamped to the game ceiling");
+        assert_eq!(doc.playthroughs_completed, 3, "playthroughs clamped to 3");
+        assert_eq!(doc.backpack_size, 39, "backpack clamped to the SDU max");
+        assert_eq!(doc.bank_size, 200, "bank clamped");
+
+        // Item level rows clamp into the 7-bit packed field's range.
+        doc.items[0].level = 9_999;
+        doc.item_level = 9_999;
+        headless(|ui| items_tab(&mut doc, ui, ACCENT, TEXT));
+        assert!(doc.items[0].level <= 127, "item level clamped");
+        assert!(doc.item_level <= 127, "the bulk level target clamped");
+
+        // Currency is capped at int32, which is what the save field holds.
+        doc.money = i64::MAX;
+        doc.eridium = i64::MAX;
+        headless(|ui| currency_tab(&mut doc, ui, ACCENT));
+        assert_eq!(doc.money, MAX, "money clamped to int32");
+        assert_eq!(doc.eridium, MAX, "eridium clamped to int32");
+    }
+
+    #[test]
+    fn rendering_leaves_valid_values_alone() {
+        // Drawing must not quietly change anything already in range.
+        let mut doc = doc_with_items();
+        doc.level = 50;
+        doc.xp = 3_429_728;
+        doc.money = 99_999_999;
+        doc.eridium = 500;
+        doc.seraph = 999;
+        doc.torgue = 999;
+        doc.skill_points = 46;
+        doc.op_level = 0;
+        doc.playthroughs_completed = 2;
+        doc.active_playthrough = 2;
+        doc.backpack_size = 24;
+        doc.bank_size = 24;
+        // An array, not a tuple: tuples only compare up to 12 elements.
+        let snapshot = |d: &Doc| -> [i64; 13] {
+            [
+                d.level,
+                d.xp,
+                d.money,
+                d.eridium,
+                d.seraph,
+                d.torgue,
+                d.skill_points,
+                d.op_level,
+                d.playthroughs_completed,
+                d.active_playthrough,
+                d.backpack_size,
+                d.bank_size,
+                d.unlocked.len() as i64,
+            ]
+        };
+        let before = snapshot(&doc);
+        headless(|ui| character_tab(&mut doc, ui, ACCENT));
+        headless(|ui| general_tab(&mut doc, ui, ACCENT));
+        headless(|ui| currency_tab(&mut doc, ui, ACCENT));
+        headless(|ui| fast_travel_tab(&mut doc, ui, ACCENT));
+        headless(|ui| vehicle_tab(&mut doc, ui, ACCENT));
+        assert_eq!(
+            before,
+            snapshot(&doc),
+            "a render pass changed an in-range value"
+        );
+    }
+
+    #[test]
+    fn combos_handle_known_unknown_and_empty_selections() {
+        let class = "GD_Siren.Character.CharClass_Siren";
+        let known = bl2_save::customizations(class, true)
+            .first()
+            .map(|c| c.path.clone())
+            .expect("the siren has heads");
+        // "0" is the save's placeholder, and an unresolvable path has to fall
+        // back to its tail rather than panic.
+        for value in [known.as_str(), "0", "", "GD_Nonsense.Some.Unknown_Path"] {
+            let mut v = value.to_string();
+            headless(|ui| customization_combo(ui, "h", class, true, &mut v));
+            assert_eq!(v, value, "rendering must not rewrite the selection");
+        }
+        for value in ["None", "", "GD_Nonsense.Vehicle.Skin"] {
+            let mut v = value.to_string();
+            headless(|ui| vehicle_skin_combo(ui, "v", "Runner", &mut v));
+            assert_eq!(v, value, "rendering must not rewrite the skin");
+        }
+        // An unknown class offers no options; the combo still has to render.
+        let mut v = "0".to_string();
+        headless(|ui| customization_combo(ui, "h", "nonsense", true, &mut v));
+        // An unknown vehicle family likewise has an empty skin list.
+        let mut v2 = "None".to_string();
+        headless(|ui| vehicle_skin_combo(ui, "v", "NoSuchFamily", &mut v2));
+    }
+
+    #[test]
+    fn parts_editor_opens_closes_and_survives_a_stale_id() {
+        let mut doc = doc_with_items();
+        doc.editing_parts = None;
+        headless(|ui| parts_editor(&mut doc, ui, ACCENT));
+        assert!(doc.editing_parts.is_none(), "stays closed");
+
+        // Open on a real item.
+        let id = doc.items[0].id;
+        doc.editing_parts = Some(id);
+        headless(|ui| parts_editor(&mut doc, ui, ACCENT));
+        assert_eq!(doc.editing_parts, Some(id), "stays open on a live id");
+
+        // An id that no longer exists closes the editor instead of panicking —
+        // this is the path a stale selection takes after an item is removed.
+        doc.editing_parts = Some(9_999);
+        headless(|ui| parts_editor(&mut doc, ui, ACCENT));
+        assert!(doc.editing_parts.is_none(), "a stale id closes the editor");
+    }
+
+    #[test]
+    fn rebuild_items_preserves_scratch_levels_by_id() {
+        let mut doc = doc_with_items();
+        for (i, v) in doc.items.iter_mut().enumerate() {
+            v.level = 30 + i as i64;
+        }
+        let want: Vec<(usize, i64)> = doc.items.iter().map(|v| (v.id, v.level)).collect();
+
+        // A structural change (importing another item) rebuilds the views.
+        doc.save
+            .add_item_from_code(&bl2_save::code_library()[7].code, false)
+            .unwrap();
+        rebuild_items_preserving_levels(&mut doc);
+
+        assert_eq!(doc.items.len(), want.len() + 1, "the new item shows up");
+        for (id, level) in want {
+            let got = doc.items.iter().find(|v| v.id == id).expect("item kept");
+            assert_eq!(got.level, level, "pending level for id {id} survived");
+        }
+    }
+
+    #[test]
+    fn raw_tab_renders_for_matching_empty_and_missing_filters() {
+        let mut doc = doc_with_items();
+        for filter in ["", "level", "20", "zzzz-no-such-field", "CLASS"] {
+            doc.raw_filter = filter.to_string();
+            headless(|ui| raw_tab(&mut doc, ui, ACCENT));
+            assert_eq!(doc.raw_filter, filter, "the filter text is not rewritten");
+        }
+        // The inspector must not have disturbed the save while listing it.
+        assert_eq!(doc.save.level(), Some(1));
+        assert!(doc.save.to_bytes().is_ok());
+    }
+
+    #[test]
+    fn items_tab_renders_both_bags() {
+        let mut doc = doc_with_items();
+        assert!(
+            doc.items.iter().any(|v| v.is_bank) && doc.items.iter().any(|v| !v.is_bank),
+            "the fixture fills both bags"
+        );
+        for show_bank in [false, true] {
+            doc.show_bank = show_bank;
+            let status = headless(|ui| items_tab(&mut doc, ui, ACCENT, TEXT));
+            assert!(status.is_none(), "no status without interaction");
+            assert_eq!(doc.show_bank, show_bank, "rendering must not flip the bag");
+        }
+    }
+
+    /// The profile view needs a decoded `profile.bin`, which can't be synthesised
+    /// from outside `bl2-save` — so this runs only when a sample is present, the
+    /// same way the core's golden tests do.
+    #[test]
+    fn profile_view_renders_a_real_profile_if_present() {
+        let Some(raw) = ["../samples/profile.bin", "samples/profile.bin"]
+            .iter()
+            .find_map(|p| std::fs::read(p).ok())
+        else {
+            eprintln!("no sample profile.bin present, skipping");
+            return;
+        };
+        let profile = ProfileFile::from_bytes(&raw).expect("the sample profile decodes");
+        let mut pdoc = ProfileDoc {
+            golden_keys: profile.golden_keys().unwrap_or(0) as i64,
+            badass_rank: profile.badass_rank().unwrap_or(0) as i64,
+            badass_tokens: profile.badass_tokens().unwrap_or(0) as i64,
+            pending_customizations: None,
+            name: "profile.bin".to_string(),
+            path: None,
+            profile,
+        };
+        headless(|ui| profile_view(&mut pdoc, ui, ACCENT));
+        assert!(
+            pdoc.pending_customizations.is_none(),
+            "no pending change without a click"
+        );
+
+        // Golden keys clamp to a byte as they render.
+        pdoc.golden_keys = 9_999;
+        headless(|ui| profile_view(&mut pdoc, ui, ACCENT));
+        assert_eq!(pdoc.golden_keys, 255, "golden keys clamped to 255");
+    }
+}
