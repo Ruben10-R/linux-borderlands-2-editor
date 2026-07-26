@@ -68,14 +68,12 @@ impl SaveFile {
             return Err(SaveError::Sha1Mismatch);
         }
         let dec = codec::decode(raw)?;
-        if !dec.is_valid() {
-            return Err(if !dec.sha_ok {
-                SaveError::Sha1Mismatch
-            } else {
-                SaveError::CrcMismatch {
-                    stored: dec.crc_stored,
-                    computed: dec.crc_calc,
-                }
+        // The hash is already known good, so the CRC over the protobuf is the
+        // only checksum left that can disagree.
+        if dec.crc_stored != dec.crc_calc {
+            return Err(SaveError::CrcMismatch {
+                stored: dec.crc_stored,
+                computed: dec.crc_calc,
             });
         }
         Ok(Self { proto: dec.proto })

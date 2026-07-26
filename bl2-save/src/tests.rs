@@ -409,6 +409,47 @@ fn a_valid_hash_over_a_corrupt_body_still_errors() {
     );
 }
 
+/// A file whose hash is right but whose inner CRC disagrees is refused.
+///
+/// This is the one checksum the SHA1 gate can't speak for: the CRC lives inside
+/// the compressed block and covers the protobuf, so it has to be re-checked
+/// after decoding. Built by patching the stored CRC of a real save and
+/// re-sealing the container so the outer hash stays valid.
+#[test]
+fn crc_mismatch_is_rejected() {
+    use sha1::{Digest, Sha1};
+
+    let good = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Maya")
+        .to_bytes()
+        .unwrap();
+    assert!(SaveFile::from_bytes(&good).is_ok(), "baseline loads");
+
+    // Unwrap the container to reach the WSG header.
+    let outer_size = u32::from_be_bytes(good[20..24].try_into().unwrap()) as usize;
+    let mut outer = lzokay_native::decompress_all(&good[24..], Some(outer_size)).unwrap();
+    // Layout: innerSize(4) "WSG"(3) version(4) crc(4, LE) protoSize(4)
+    assert_eq!(&outer[4..7], b"WSG");
+    let real_crc = u32::from_le_bytes(outer[11..15].try_into().unwrap());
+    outer[11..15].copy_from_slice(&real_crc.wrapping_add(1).to_le_bytes());
+
+    // Re-seal: recompress, then recompute the outer SHA1 so only the CRC is wrong.
+    let compressed = lzokay_native::compress(&outer).unwrap();
+    let mut body = (outer.len() as u32).to_be_bytes().to_vec();
+    body.extend_from_slice(&compressed);
+    let mut raw = Sha1::digest(&body).to_vec();
+    raw.extend_from_slice(&body);
+
+    assert!(codec::sha1_matches(&raw), "outer hash still valid");
+    match SaveFile::from_bytes(&raw) {
+        Err(SaveError::CrcMismatch { stored, computed }) => {
+            assert_eq!(stored, real_crc.wrapping_add(1));
+            assert_eq!(computed, real_crc, "reports the CRC it computed");
+        }
+        Err(e) => panic!("expected CrcMismatch, got {e}"),
+        Ok(_) => panic!("expected CrcMismatch, but the save loaded"),
+    }
+}
+
 /// Deterministic fuzz sweep: no byte string may crash the loaders.
 ///
 /// This is the regression net for the whole "corrupt file panics instead of
