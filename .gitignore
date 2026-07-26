@@ -12,14 +12,16 @@ dist/
 # JetBrains RustRover
 .idea/
 
-# Save backups written next to an edited file
+# Real saves and profiles — ANYWHERE in the tree, not just samples/. A save
+# carries your character name and GUID and normally lives in a folder named
+# after your SteamID64, so none of it belongs in a public repo. Scoping this to
+# samples/ once let a stray save elsewhere get committed.
+**/*.sav
 **/*.sav.bak
-
-# Real save copies — keep personal saves (and Steam ID) out of the public repo
-samples/*.sav
+**/*.bin
 
 # Gibbed UI reference screenshots (copyrighted — local reference only)
 gibbed editor pictures/
 
-# profile.bin samples (personal, like .sav)
-samples/*.bin
+# Playwright MCP scratch output (screenshots, and any file it downloads)
+.playwright-mcp/
