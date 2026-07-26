@@ -254,6 +254,13 @@ pub(crate) fn lzo_decompress(src: &[u8], expected: usize, what: &str) -> Result<
     }
 }
 
+/// Does the file's leading SHA1 match its body? Cheap, and decisive: anything
+/// that isn't a BL2 save fails it, so callers can reject a file before handing
+/// arbitrary bytes to the LZO decompressor.
+pub(crate) fn sha1_matches(raw: &[u8]) -> bool {
+    raw.len() >= 24 && sha1(&raw[20..]) == raw[0..20]
+}
+
 fn sha1(data: &[u8]) -> [u8; 20] {
     let mut h = Sha1::new();
     h.update(data);

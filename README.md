@@ -145,6 +145,39 @@ cp profile.bin profile.bin.backup
 The native GUI is excluded from the default cargo build (it needs GL/X11 libs);
 `build-native.sh` provides those via `docker/native.Dockerfile`.
 
+### Tests, and the two that need your own save
+
+`./run.sh test` runs everything that can run anywhere: the codec round-trip, a
+byte-for-byte golden test against Gibbed's "New" output, item-serial packing,
+every edit guarded so it touches only its own protobuf fields, malformed-input
+handling, and a seeded fuzz sweep over both loaders.
+
+Two tests are different — `golden_real_save_if_present` and
+`golden_real_profile_if_present`. They exercise nearly every edit path against a
+**real** file (real item serials, real field layouts, the quirks synthetic data
+can't reproduce), and they **skip silently** when no sample is there:
+
+```
+golden: no sample save present, skipping
+```
+
+`samples/` is git-ignored on purpose. A real save carries your character and
+GUID, and it lives in a folder named after your SteamID64 — none of that belongs
+in a public repo. **So these two tests never run in CI.** They only run for
+whoever has a sample locally, which means CI green does not mean the real-file
+paths were checked.
+
+To run them, drop your own copies in:
+
+```bash
+cp ~/.local/share/aspyr-media/borderlands\ 2/willowgame/savedata/*/save0001.sav samples/
+cp ~/.local/share/aspyr-media/borderlands\ 2/willowgame/savedata/*/profile.bin  samples/
+./run.sh test -p bl2-save          # now the golden tests run instead of skipping
+```
+
+They are read-only: each loads the sample, edits a copy in memory, and asserts
+the result self-verifies. Your files are never written back.
+
 ## Releases & updating
 
 Push a version tag and GitHub Actions (`.github/workflows/release.yml`) builds

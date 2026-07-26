@@ -368,6 +368,47 @@ fn set_item_part_validates_ranges() {
     );
 }
 
+/// Junk is turned away by the SHA1 gate before it can reach the decompressor.
+///
+/// `lzokay-native` panics on some malformed LZO streams. On native that panic is
+/// contained, but on wasm32 panics abort, so the web build would die. Rejecting
+/// on the hash first is what makes arbitrary files safe to open everywhere.
+#[test]
+fn junk_is_rejected_before_it_reaches_the_decompressor() {
+    for len in [24usize, 64, 512, 4096] {
+        let junk: Vec<u8> = (0..len)
+            .map(|i| ((i as u32).wrapping_mul(2_654_435_761) % 251) as u8)
+            .collect();
+        assert!(
+            matches!(SaveFile::from_bytes(&junk), Err(SaveError::Sha1Mismatch)),
+            "{len} bytes of junk must fail on the hash, not in LZO"
+        );
+    }
+    // Too short to even hold a hash.
+    assert!(matches!(
+        SaveFile::from_bytes(&[0u8; 10]),
+        Err(SaveError::TooShort(10))
+    ));
+}
+
+/// The gate is not a guarantee: a correct SHA1 can be computed over a malformed
+/// body. That still has to be a clean error rather than a crash.
+#[test]
+fn a_valid_hash_over_a_corrupt_body_still_errors() {
+    use sha1::{Digest, Sha1};
+    let mut body = Vec::new();
+    body.extend_from_slice(&1000u32.to_be_bytes()); // claims a 1000-byte block
+    body.extend_from_slice(&[0x11u8; 80]); // ...from data that isn't valid LZO
+    let mut raw = Sha1::digest(&body).to_vec();
+    raw.extend_from_slice(&body);
+
+    assert!(codec::sha1_matches(&raw), "hash is deliberately correct");
+    assert!(
+        SaveFile::from_bytes(&raw).is_err(),
+        "must return an error, not panic"
+    );
+}
+
 /// Deterministic fuzz sweep: no byte string may crash the loaders.
 ///
 /// This is the regression net for the whole "corrupt file panics instead of

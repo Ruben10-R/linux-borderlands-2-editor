@@ -55,6 +55,18 @@ pub struct SaveFile {
 impl SaveFile {
     /// Decode a full `.sav` byte buffer, validating SHA1 + CRC.
     pub fn from_bytes(raw: &[u8]) -> Result<Self> {
+        // Check the SHA1 before decompressing. Nothing is lost — a file whose
+        // hash is wrong was going to be rejected anyway — and it keeps arbitrary
+        // bytes out of the LZO decompressor, which panics on some malformed
+        // streams. That panic is contained on native but NOT on wasm32, where
+        // panics abort, so gating here is what protects the web build.
+        // (`ProfileFile::from_bytes` has always done this.)
+        if raw.len() < 24 {
+            return Err(SaveError::TooShort(raw.len()));
+        }
+        if !codec::sha1_matches(raw) {
+            return Err(SaveError::Sha1Mismatch);
+        }
         let dec = codec::decode(raw)?;
         if !dec.is_valid() {
             return Err(if !dec.sha_ok {
