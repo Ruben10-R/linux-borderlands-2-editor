@@ -45,6 +45,13 @@ pub use stations::Station;
 use std::fs;
 use std::path::Path;
 
+/// Highest Overpower level the game supports: OP1–OP8, each earned by clearing
+/// Digistruct Peak again at level 72 with UVHM finished. 0 means no OP level.
+///
+/// The setter itself doesn't clamp — it stays faithful to whatever it's given —
+/// so frontends clamp to this when offering the value to a user.
+pub const MAX_OP_LEVEL: i64 = 8;
+
 /// A loaded Borderlands 2 save, held as its decoded inner protobuf.
 ///
 /// All edits mutate the protobuf surgically; call [`SaveFile::save`] to re-encode.
@@ -403,8 +410,9 @@ impl SaveFile {
         items::read_items(&self.proto)
     }
 
-    /// Unlocked Overpower level (0–80+), or None if the character has no OP data
-    /// yet. Stored as a hidden "virtual item" (see [`SaveFile::set_op_level`]).
+    /// Unlocked Overpower level (0–8 in game), or None if the character has no
+    /// OP data yet. Stored as a hidden "virtual item" (see
+    /// [`SaveFile::set_op_level`]).
     pub fn op_level(&self) -> Option<i64> {
         items::read_op_level(&self.proto).ok().flatten()
     }
@@ -614,7 +622,8 @@ impl SaveFile {
         }
     }
 
-    /// Set the unlocked Overpower level (0 clears it). Requires level 72 + a
+    /// Set the unlocked Overpower level (0 clears it; see [`MAX_OP_LEVEL`] for
+    /// the game's ceiling — this does not clamp). Requires level 72 + a
     /// completed UVHM to be meaningful in-game; the level is then selected at the
     /// character screen. Stored as a hidden virtual item; only field 53 changes.
     pub fn set_op_level(&mut self, op: i64) -> Result<()> {

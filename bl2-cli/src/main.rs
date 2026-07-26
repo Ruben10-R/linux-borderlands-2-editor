@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bl2_save::{ImportGroup, Location, ProfileFile, SaveError, SaveFile};
+use bl2_save::{ImportGroup, Location, ProfileFile, SaveError, SaveFile, MAX_OP_LEVEL};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -178,7 +178,9 @@ enum Cmd {
         #[command(flatten)]
         w: WriteOpts,
     },
-    /// Set the unlocked Overpower level (0 clears it; needs lvl 72 + UVHM).
+    /// Set the unlocked Overpower level (0–8; 0 clears it). OP levels only do
+    /// anything at level 72 with UVHM finished, and are earned one at a time by
+    /// clearing Digistruct Peak.
     SetOpLevel {
         sav: PathBuf,
         level: i64,
@@ -376,7 +378,7 @@ fn run(cli: Cli) -> Result<(), SaveError> {
             w,
             "op level",
             |s| s.op_level().unwrap_or(0),
-            |s| s.set_op_level(level.clamp(0, 80)),
+            |s| s.set_op_level(level.clamp(0, MAX_OP_LEVEL)),
         ),
         Cmd::Customizations { sav } => cmd_customizations(&sav),
         Cmd::SetHeadSkin { sav, head, skin, w } => cmd_set_head_skin(&sav, &head, &skin, w),
@@ -1152,6 +1154,29 @@ mod tests {
         .unwrap();
         assert!(!bak.exists(), "--no-backup wrote no .bak");
         assert_eq!(SaveFile::load(&sav).unwrap().skill_points(), Some(7));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_op_level_clamps_to_the_game_ceiling() {
+        // OP1-OP8 is all the game has; anything above is meaningless.
+        let dir = tmpdir("op");
+        let sav = fixture(&dir, "save0001.sav");
+        let p = sav.to_str().unwrap();
+
+        cli(&["bl2edit", "set-op-level", p, "8"]).unwrap();
+        assert_eq!(SaveFile::load(&sav).unwrap().op_level(), Some(8));
+
+        cli(&["bl2edit", "set-op-level", p, "80"]).unwrap();
+        assert_eq!(
+            SaveFile::load(&sav).unwrap().op_level(),
+            Some(MAX_OP_LEVEL),
+            "80 clamps to the OP ceiling"
+        );
+
+        // 0 is valid and means "no OP level".
+        cli(&["bl2edit", "set-op-level", p, "0"]).unwrap();
+        assert_eq!(SaveFile::load(&sav).unwrap().op_level(), Some(0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

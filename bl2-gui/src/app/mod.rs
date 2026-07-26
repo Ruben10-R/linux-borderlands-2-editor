@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use bl2_save::{Location, ProfileFile, SaveError, SaveFile};
+use bl2_save::{Location, ProfileFile, SaveError, SaveFile, MAX_OP_LEVEL};
 use eframe::egui;
 
 use crate::theme;
@@ -785,7 +785,7 @@ fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
         .set_active_playthrough(doc.active_playthrough.clamp(0, 2))?;
     // OP level — only rewrite the virtual item if it actually changed.
     if doc.op_level != doc.save.op_level().unwrap_or(0) {
-        doc.save.set_op_level(doc.op_level.clamp(0, 80))?;
+        doc.save.set_op_level(doc.op_level.clamp(0, MAX_OP_LEVEL))?;
     }
     // Backpack / bank capacity — only rewrite if changed.
     if doc.backpack_size != doc.save.backpack_size().unwrap_or(12) {
@@ -1531,6 +1531,16 @@ mod tests {
         assert_eq!(doc.save.torgue(), 999);
         assert_eq!(doc.save.skill_points(), Some(26));
         assert!(doc.save.to_bytes().is_ok(), "still a valid save");
+    }
+
+    /// The OP scratch value is clamped to the game's ceiling on the way in.
+    #[test]
+    fn apply_edits_clamps_op_level() {
+        let mut doc = fresh_doc();
+        doc.op_level = 80;
+        apply_edits(&mut doc).expect("apply");
+        assert_eq!(doc.save.op_level(), Some(MAX_OP_LEVEL));
+        assert_eq!(MAX_OP_LEVEL, 8, "OP1-OP8 is the game's range");
     }
 
     /// `resync_scratch` pulls the save's values back into the scratch fields

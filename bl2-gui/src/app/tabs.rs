@@ -239,12 +239,13 @@ pub(super) fn general_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color3
             key(ui, "Overpower level", accent);
             ui.horizontal(|ui| {
                 edit_number(ui, &mut doc.op_level, 1.0);
-                doc.op_level = doc.op_level.clamp(0, 80);
+                doc.op_level = doc.op_level.clamp(0, MAX_OP_LEVEL);
                 ui.weak(if doc.op_level == 0 {
                     "off"
                 } else {
                     "OP levels unlocked"
                 });
+                ui.weak(format!("0–{MAX_OP_LEVEL}"));
             });
             ui.end_row();
 
