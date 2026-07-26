@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "bl2-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bl2-save",
  "clap",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "bl2-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bl2-save",
  "eframe",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "bl2-save"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "getrandom 0.2.17",
