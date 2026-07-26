@@ -729,6 +729,45 @@ impl App {
     }
 }
 
+/// Re-read every scratch value from the save, leaving UI state (search filters,
+/// open pickers, pending per-item level edits) untouched.
+///
+/// The Raw tab writes straight into the save, while the other tabs hold scratch
+/// values that [`apply_edits`] pushes in on save. Without this, a raw edit to a
+/// field a tab also owns would be silently overwritten by that tab's stale
+/// scratch value the next time the user saved.
+fn resync_scratch(doc: &mut Doc) {
+    doc.char_name = doc.save.name().unwrap_or_default();
+    doc.class_def = doc.save.class_def().unwrap_or_default();
+    let wearing = doc.save.wearing();
+    doc.head = wearing.first().cloned().unwrap_or_else(|| "0".into());
+    doc.skin = wearing.get(4).cloned().unwrap_or_else(|| "0".into());
+    doc.vehicle = bl2_save::VEHICLE_FAMILIES
+        .iter()
+        .map(|f| {
+            let sk = doc.save.vehicle_family_skins(f.path);
+            (
+                sk.first().cloned().unwrap_or_default(),
+                sk.get(1).cloned().unwrap_or_default(),
+            )
+        })
+        .collect();
+    doc.skill_points = doc.save.skill_points().unwrap_or(0);
+    doc.specialist_skill_points = doc.save.specialist_skill_points().unwrap_or(0);
+    doc.playthroughs_completed = doc.save.playthroughs_completed().unwrap_or(0);
+    doc.active_playthrough = doc.save.active_playthrough();
+    doc.op_level = doc.save.op_level().unwrap_or(0);
+    doc.backpack_size = doc.save.backpack_size().unwrap_or(12);
+    doc.bank_size = doc.save.bank_size();
+    doc.level = doc.save.level().unwrap_or(0);
+    doc.xp = doc.save.xp().unwrap_or(0);
+    doc.money = doc.save.money();
+    doc.eridium = doc.save.eridium();
+    doc.seraph = doc.save.seraph();
+    doc.torgue = doc.save.torgue();
+    doc.unlocked = doc.save.visited_stations().into_iter().collect();
+}
+
 /// Push the scratch values into the save via the guarded setters.
 fn apply_edits(doc: &mut Doc) -> Result<(), SaveError> {
     doc.save.set_money(doc.money.clamp(0, MAX))?;
@@ -1113,7 +1152,15 @@ impl eframe::App for App {
                                 Tab::About => theme::info(ui, 16.0, col),
                             }
                             let label = egui::RichText::new(t.label()).color(col).strong();
-                            if ui.selectable_label(self.tab == t, label).clicked() {
+                            if ui.selectable_label(self.tab == t, label).clicked() && self.tab != t {
+                                // The Raw tab reads and writes the save directly,
+                                // so commit the other tabs' pending scratch edits
+                                // first — otherwise it shows stale values.
+                                if t == Tab::Raw {
+                                    if let Some(d) = self.doc.as_mut() {
+                                        let _ = apply_edits(d);
+                                    }
+                                }
                                 self.tab = t;
                             }
                             ui.add_space(10.0);
@@ -1450,4 +1497,88 @@ fn field(ui: &mut egui::Ui, k: &str, value: &str, accent: egui::Color32) {
     key(ui, k, accent);
     ui.monospace(value);
     ui.end_row();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_doc() -> Doc {
+        let save = SaveFile::new_character("GD_Mercenary.Character.CharClass_Mercenary", "Sal");
+        doc_from_save(save, "save0001.sav".to_string(), None)
+    }
+
+    /// Scratch values are what the tabs edit; `apply_edits` is what commits them.
+    #[test]
+    fn apply_edits_pushes_scratch_into_the_save() {
+        let mut doc = fresh_doc();
+        doc.level = 30;
+        doc.xp = 820_463;
+        doc.money = 99_999_999;
+        doc.eridium = 500;
+        doc.seraph = 999;
+        doc.torgue = 999;
+        doc.skill_points = 26;
+        // Untouched until we apply.
+        assert_eq!(doc.save.level(), Some(1));
+
+        apply_edits(&mut doc).expect("apply");
+        assert_eq!(doc.save.level(), Some(30));
+        assert_eq!(doc.save.xp(), Some(820_463));
+        assert_eq!(doc.save.money(), 99_999_999);
+        assert_eq!(doc.save.eridium(), 500);
+        assert_eq!(doc.save.seraph(), 999);
+        assert_eq!(doc.save.torgue(), 999);
+        assert_eq!(doc.save.skill_points(), Some(26));
+        assert!(doc.save.to_bytes().is_ok(), "still a valid save");
+    }
+
+    /// `resync_scratch` pulls the save's values back into the scratch fields
+    /// without disturbing UI state.
+    #[test]
+    fn resync_scratch_reads_the_save_back() {
+        let mut doc = fresh_doc();
+        doc.raw_filter = "level".to_string(); // UI state that must survive
+        doc.show_bank = true;
+        doc.save.set_level(42).unwrap();
+        doc.save.set_money(1234).unwrap();
+
+        resync_scratch(&mut doc);
+        assert_eq!(doc.level, 42);
+        assert_eq!(doc.money, 1234);
+        assert_eq!(doc.raw_filter, "level", "UI state preserved");
+        assert!(doc.show_bank, "UI state preserved");
+    }
+
+    /// Regression: a Raw-tab edit to a field another tab also owns used to be
+    /// silently overwritten by that tab's stale scratch value on the next save.
+    #[test]
+    fn raw_edit_survives_a_later_save() {
+        let mut doc = fresh_doc();
+
+        // Character tab: level 30, committed when the user opens the Raw tab.
+        doc.level = 30;
+        apply_edits(&mut doc).unwrap();
+        assert_eq!(doc.save.level(), Some(30), "Raw tab now shows the truth");
+
+        // Raw tab: edit level straight in the save, then resync (what the UI does).
+        doc.save.set_raw_varint(2, 55).unwrap();
+        resync_scratch(&mut doc);
+        assert_eq!(doc.level, 55, "scratch tracks the raw edit");
+
+        // Saving must not resurrect the old scratch value.
+        apply_edits(&mut doc).unwrap();
+        assert_eq!(doc.save.level(), Some(55), "raw edit survived the save");
+    }
+
+    /// A raw edit to a field no tab owns (save_game_id) also survives, and
+    /// resyncing doesn't clobber it.
+    #[test]
+    fn raw_edit_to_an_untabbed_field_survives() {
+        let mut doc = fresh_doc();
+        doc.save.set_raw_varint(20, 4).unwrap();
+        resync_scratch(&mut doc);
+        apply_edits(&mut doc).unwrap();
+        assert_eq!(doc.save.save_game_id(), Some(4));
+    }
 }

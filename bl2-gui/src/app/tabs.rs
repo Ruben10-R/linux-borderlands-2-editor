@@ -712,12 +712,18 @@ pub(super) fn raw_tab(doc: &mut Doc, ui: &mut egui::Ui, accent: egui::Color32) {
                 if let Some(v) = f.value {
                     let mut v2 = v;
                     if ui.add(egui::DragValue::new(&mut v2).speed(1.0)).changed() {
-                        let _ = doc.save.set_raw_varint(f.number, v2);
+                        // Refresh the scratch values so a field another tab also
+                        // owns (level, money, …) isn't overwritten on save.
+                        if doc.save.set_raw_varint(f.number, v2).is_ok() {
+                            resync_scratch(doc);
+                        }
                     }
                 } else if let Some(t) = &f.text {
                     let mut t2 = t.clone();
-                    if ui.text_edit_singleline(&mut t2).changed() {
-                        let _ = doc.save.set_raw_string(f.number, &t2);
+                    if ui.text_edit_singleline(&mut t2).changed()
+                        && doc.save.set_raw_string(f.number, &t2).is_ok()
+                    {
+                        resync_scratch(doc);
                     }
                 } else {
                     ui.monospace(&f.preview);

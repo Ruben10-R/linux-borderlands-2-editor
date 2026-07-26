@@ -127,6 +127,15 @@ enum Cmd {
     },
     /// Dump every top-level protobuf field (read-only inspector).
     Raw { sav: PathBuf },
+    /// Set the save-slot id (field 20). Keep it equal to the NNNN in
+    /// saveNNNN.sav, or the game may renumber the slot and overwrite another
+    /// save. The GUI does this for you when saving a new character.
+    SetSaveId {
+        sav: PathBuf,
+        id: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
     /// Set playthroughs completed (0-3): 1 unlocks TVHM, 2 unlocks UVHM.
     SetPlaythroughs {
         sav: PathBuf,
@@ -152,6 +161,13 @@ enum Cmd {
     SetBank {
         sav: PathBuf,
         slots: i64,
+        #[command(flatten)]
+        w: WriteOpts,
+    },
+    /// Set unspent skill points for the main skill trees.
+    SetSkillPoints {
+        sav: PathBuf,
+        points: i64,
         #[command(flatten)]
         w: WriteOpts,
     },
@@ -261,15 +277,17 @@ struct WriteOpts {
 }
 
 fn main() -> ExitCode {
-    if let Err(e) = run() {
+    if let Err(e) = run(Cli::parse()) {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
 }
 
-fn run() -> Result<(), SaveError> {
-    match Cli::parse().cmd {
+/// Dispatch a parsed command. Takes the `Cli` rather than parsing it here so
+/// tests can drive real commands via `Cli::try_parse_from`.
+fn run(cli: Cli) -> Result<(), SaveError> {
+    match cli.cmd {
         Cmd::Info { sav } => cmd_info(&sav),
         Cmd::Items { sav, parts } => cmd_items(&sav, parts),
         Cmd::SetMoney { sav, amount, w } => {
@@ -339,6 +357,13 @@ fn run() -> Result<(), SaveError> {
             |s| s.bank_size(),
             |s| s.set_bank_size(slots),
         ),
+        Cmd::SetSkillPoints { sav, points, w } => edit(
+            &sav,
+            w,
+            "skill points",
+            |s| s.skill_points().unwrap_or(0),
+            |s| s.set_skill_points(points.max(0)),
+        ),
         Cmd::SetSpecialistPoints { sav, points, w } => edit(
             &sav,
             w,
@@ -363,6 +388,13 @@ fn run() -> Result<(), SaveError> {
         }
         Cmd::CodeIndex { file } => cmd_code_index(&file),
         Cmd::Raw { sav } => cmd_raw(&sav),
+        Cmd::SetSaveId { sav, id, w } => edit(
+            &sav,
+            w,
+            "save id",
+            |s| s.save_game_id().unwrap_or(0),
+            |s| s.set_raw_varint(20, id.max(1)),
+        ),
         Cmd::UnlockStations { sav, w } => cmd_unlock_stations(&sav, w),
         Cmd::ExportCodes { sav } => cmd_export_codes(&sav),
         Cmd::ImportCode { sav, code, bank, w } => cmd_import_code(&sav, &code, bank, w),
@@ -956,6 +988,217 @@ fn warn_if_steam_cloud(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch dir unique to the calling test, cleaned up by the caller.
+    fn tmpdir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("bl2cli_{}_{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A fresh level-1 save on disk to run commands against.
+    fn fixture(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        SaveFile::new_character("GD_Mercenary.Character.CharClass_Mercenary", "Sal")
+            .save(&p, false)
+            .unwrap();
+        p
+    }
+
+    /// Parse an argv the way the real binary does, then dispatch it.
+    fn cli(args: &[&str]) -> Result<(), SaveError> {
+        let parsed = Cli::try_parse_from(args).expect("argv should parse");
+        run(parsed)
+    }
+
+    #[test]
+    fn set_save_id_writes_field_20() {
+        let dir = tmpdir("saveid");
+        let sav = fixture(&dir, "save0007.sav");
+        // A fresh character is always slot 1; the file name says 7.
+        assert_eq!(SaveFile::load(&sav).unwrap().save_game_id(), Some(1));
+
+        cli(&["bl2edit", "set-save-id", sav.to_str().unwrap(), "7"]).unwrap();
+
+        let after = SaveFile::load(&sav).unwrap();
+        assert_eq!(after.save_game_id(), Some(7), "slot id written");
+        // The guarded edit must not disturb anything else.
+        assert_eq!(after.level(), Some(1));
+        assert_eq!(after.name().as_deref(), Some("Sal"));
+        assert_eq!(after.money(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_save_id_clamps_to_a_real_slot() {
+        // Slot 0 and negatives aren't valid save slots; the command clamps to 1
+        // rather than writing a value the game would choke on.
+        let dir = tmpdir("saveid_clamp");
+        let sav = fixture(&dir, "save0001.sav");
+        let p = sav.to_str().unwrap();
+
+        cli(&["bl2edit", "set-save-id", p, "0"]).unwrap();
+        assert_eq!(
+            SaveFile::load(&sav).unwrap().save_game_id(),
+            Some(1),
+            "slot 0 clamps to 1"
+        );
+
+        // A bare "-5" is rejected by clap as an unknown flag, so a negative can
+        // only arrive after "--" — clamped the same way.
+        assert!(Cli::try_parse_from(["bl2edit", "set-save-id", p, "-5"]).is_err());
+        cli(&["bl2edit", "set-save-id", p, "--", "-5"]).unwrap();
+        assert_eq!(
+            SaveFile::load(&sav).unwrap().save_game_id(),
+            Some(1),
+            "negative slot clamps to 1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_skill_points_writes_and_clamps() {
+        let dir = tmpdir("skill");
+        let sav = fixture(&dir, "save0001.sav");
+        assert_eq!(SaveFile::load(&sav).unwrap().skill_points(), Some(0));
+
+        cli(&["bl2edit", "set-skill-points", sav.to_str().unwrap(), "26"]).unwrap();
+        let after = SaveFile::load(&sav).unwrap();
+        assert_eq!(after.skill_points(), Some(26));
+        assert_eq!(after.level(), Some(1), "nothing else moved");
+        assert_eq!(
+            after.specialist_skill_points(),
+            Some(0),
+            "other pool intact"
+        );
+
+        // Negative points are meaningless — clamp to 0. clap rejects a bare
+        // "-3" as an unknown flag, so it can only arrive after "--".
+        assert!(Cli::try_parse_from(["bl2edit", "set-skill-points", "x.sav", "-3"]).is_err());
+        cli(&[
+            "bl2edit",
+            "set-skill-points",
+            sav.to_str().unwrap(),
+            "--",
+            "-3",
+        ])
+        .unwrap();
+        assert_eq!(SaveFile::load(&sav).unwrap().skill_points(), Some(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_commands_honour_dry_run_out_and_backup() {
+        let dir = tmpdir("writeopts");
+        let sav = fixture(&dir, "save0001.sav");
+
+        // --dry-run reports the change but leaves the file alone.
+        cli(&[
+            "bl2edit",
+            "set-skill-points",
+            sav.to_str().unwrap(),
+            "15",
+            "--dry-run",
+        ])
+        .unwrap();
+        assert_eq!(
+            SaveFile::load(&sav).unwrap().skill_points(),
+            Some(0),
+            "dry-run wrote nothing"
+        );
+        assert!(
+            !dir.join("save0001.sav.bak").exists(),
+            "dry-run made no .bak"
+        );
+
+        // --out redirects, leaving the input untouched.
+        let out = dir.join("copy.sav");
+        cli(&[
+            "bl2edit",
+            "set-save-id",
+            sav.to_str().unwrap(),
+            "9",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(SaveFile::load(&out).unwrap().save_game_id(), Some(9));
+        assert_eq!(
+            SaveFile::load(&sav).unwrap().save_game_id(),
+            Some(1),
+            "input untouched by --out"
+        );
+
+        // An in-place edit backs the old file up by default...
+        cli(&["bl2edit", "set-skill-points", sav.to_str().unwrap(), "5"]).unwrap();
+        let bak = dir.join("save0001.sav.bak");
+        assert!(bak.exists(), "backup written by default");
+        assert_eq!(
+            SaveFile::load(&bak).unwrap().skill_points(),
+            Some(0),
+            "backup holds the pre-edit value"
+        );
+
+        // ...and --no-backup skips refreshing it.
+        std::fs::remove_file(&bak).unwrap();
+        cli(&[
+            "bl2edit",
+            "set-skill-points",
+            sav.to_str().unwrap(),
+            "7",
+            "--no-backup",
+        ])
+        .unwrap();
+        assert!(!bak.exists(), "--no-backup wrote no .bak");
+        assert_eq!(SaveFile::load(&sav).unwrap().skill_points(), Some(7));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_commands_report_a_missing_file_as_an_error() {
+        let missing = std::env::temp_dir().join("bl2cli_does_not_exist.sav");
+        assert!(cli(&["bl2edit", "set-save-id", missing.to_str().unwrap(), "3"]).is_err());
+        assert!(cli(&[
+            "bl2edit",
+            "set-skill-points",
+            missing.to_str().unwrap(),
+            "3"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn new_commands_reject_bad_argv() {
+        // Both take exactly <SAV> <VALUE>; a non-numeric value or a missing
+        // argument must fail parsing rather than be silently coerced.
+        for args in [
+            vec!["bl2edit", "set-save-id"],
+            vec!["bl2edit", "set-save-id", "x.sav"],
+            vec!["bl2edit", "set-save-id", "x.sav", "notanumber"],
+            vec!["bl2edit", "set-skill-points"],
+            vec!["bl2edit", "set-skill-points", "x.sav"],
+            vec!["bl2edit", "set-skill-points", "x.sav", "1.5"],
+        ] {
+            assert!(
+                Cli::try_parse_from(&args).is_err(),
+                "argv {args:?} should not parse"
+            );
+        }
+        // The documented forms do parse.
+        assert!(Cli::try_parse_from(["bl2edit", "set-save-id", "x.sav", "3"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["bl2edit", "set-skill-points", "x.sav", "26", "--dry-run"])
+                .is_ok()
+        );
+    }
+
+    /// clap's own invariants: every subcommand and flag stays wired up.
+    #[test]
+    fn command_definition_is_valid() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
 
     #[test]
     fn resolve_class_accepts_names_and_paths() {
