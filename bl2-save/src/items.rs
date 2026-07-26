@@ -104,10 +104,21 @@ pub fn relevel_all(protobuf: &[u8], level: i64, force: bool) -> Result<(Vec<u8>,
 /// Returns the new protobuf and whether it changed (false if the id doesn't
 /// exist or the item is a protected "no-level" item). Never levels grade-≤1.
 pub fn set_one_level(protobuf: &[u8], target: usize, level: i64) -> Result<(Vec<u8>, bool)> {
+    let (out, changed) = set_levels(protobuf, &[(target, level)])?;
+    Ok((out, changed > 0))
+}
+
+/// Set the level of many items in a single rebuild. `targets` pairs an
+/// [`Item::id`] with the level it should end up at; ids not listed are copied
+/// through untouched. Returns the new protobuf and how many items changed.
+///
+/// One pass for the whole batch — levelling a full bank one item at a time means
+/// re-parsing and rebuilding the entire protobuf per item.
+pub fn set_levels(protobuf: &[u8], targets: &[(usize, i64)]) -> Result<(Vec<u8>, usize)> {
     let fields = proto::parse_fields(protobuf)?;
     let mut out = Vec::with_capacity(protobuf.len());
     let mut id = 0usize;
-    let mut changed = false;
+    let mut changed = 0usize;
     for f in &fields {
         let is_item_field = matches!(f.number, 41 | 53 | 54) && f.wire_type == 2;
         if !is_item_field {
@@ -117,23 +128,28 @@ pub fn set_one_level(protobuf: &[u8], target: usize, level: i64) -> Result<(Vec<
         let this_id = id;
         id += 1;
         let entry = proto::wire2_content(protobuf, f)?;
-        let new_entry = if this_id == target {
-            let ifields = proto::parse_fields(entry)?;
-            match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
-                Some(sf) => {
-                    let serial = proto::wire2_content(entry, sf)?;
-                    match serial::releveled(serial, level, false)? {
-                        Some(new_serial) => {
-                            changed = true;
-                            proto::replace_field_content(entry, &ifields, 1, &new_serial)
+        let want = targets
+            .iter()
+            .find(|(tid, _)| *tid == this_id)
+            .map(|(_, lvl)| *lvl);
+        let new_entry = match want {
+            Some(level) => {
+                let ifields = proto::parse_fields(entry)?;
+                match ifields.iter().find(|x| x.number == 1 && x.wire_type == 2) {
+                    Some(sf) => {
+                        let serial = proto::wire2_content(entry, sf)?;
+                        match serial::releveled(serial, level, false)? {
+                            Some(new_serial) => {
+                                changed += 1;
+                                proto::replace_field_content(entry, &ifields, 1, &new_serial)
+                            }
+                            None => entry.to_vec(),
                         }
-                        None => entry.to_vec(),
                     }
+                    None => entry.to_vec(),
                 }
-                None => entry.to_vec(),
             }
-        } else {
-            entry.to_vec()
+            None => entry.to_vec(),
         };
         proto::emit_wire2_field(&mut out, f.number, &new_entry);
     }

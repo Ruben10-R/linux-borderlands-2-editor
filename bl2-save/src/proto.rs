@@ -218,8 +218,16 @@ pub fn parse_fields(buf: &[u8]) -> Result<Vec<Field>> {
             }
             1 => pos += 8,
             2 => {
-                let len = read_varint(buf, &mut pos)? as usize;
-                pos += len;
+                // Compare in u64 against what's left. Casting the length to
+                // usize first would truncate on a 32-bit target (wasm32) and a
+                // crafted length could then wrap past the check below.
+                let len = read_varint(buf, &mut pos)?;
+                if len > (buf.len() - pos) as u64 {
+                    return Err(SaveError::Proto(
+                        "length-delimited field runs past end of buffer".into(),
+                    ));
+                }
+                pos += len as usize;
             }
             5 => pos += 4,
             other => return Err(SaveError::Proto(format!("unsupported wire type {other}"))),
@@ -246,8 +254,13 @@ pub(crate) fn wire2_content<'a>(buf: &'a [u8], f: &Field) -> Result<&'a [u8]> {
         return Err(SaveError::Proto("expected a length-delimited field".into()));
     }
     let mut p = f.val_start;
-    let len = read_varint(buf, &mut p)? as usize;
-    buf.get(p..p + len)
+    let len = read_varint(buf, &mut p)?;
+    // `p + len` in usize could overflow on a 32-bit target, so range-check first.
+    let end = usize::try_from(len)
+        .ok()
+        .and_then(|l| p.checked_add(l))
+        .ok_or_else(|| SaveError::Proto("length-delimited field length overflows".into()))?;
+    buf.get(p..end)
         .ok_or_else(|| SaveError::Proto("length-delimited field runs past end".into()))
 }
 
@@ -340,9 +353,9 @@ pub fn read_string_field(buf: &[u8], fields: &[Field], number: u64) -> Option<St
     let f = fields
         .iter()
         .find(|f| f.number == number && f.wire_type == 2)?;
-    let mut p = f.val_start;
-    let len = read_varint(buf, &mut p).ok()? as usize;
-    Some(String::from_utf8_lossy(&buf[p..p + len]).into_owned())
+    // Bounds-checked rather than sliced directly: the length comes from the file.
+    let content = wire2_content(buf, f).ok()?;
+    Some(String::from_utf8_lossy(content).into_owned())
 }
 
 /// Map a class-definition asset path to the character's name.
@@ -375,11 +388,12 @@ pub fn read_currency(buf: &[u8], fields: &[Field]) -> Result<Vec<i64>> {
                 out.push(read_varint(buf, &mut p)? as i64);
             }
             2 => {
-                let mut p = f.val_start;
-                let len = read_varint(buf, &mut p)? as usize;
-                let content_end = p + len;
-                while p < content_end {
-                    out.push(read_varint(buf, &mut p)? as i64);
+                // Walk the packed block via its bounds-checked content slice, so
+                // a bogus length can't run the reader on into later fields.
+                let content = wire2_content(buf, f)?;
+                let mut p = 0usize;
+                while p < content.len() {
+                    out.push(read_varint(content, &mut p)? as i64);
                 }
             }
             other => {

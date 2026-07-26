@@ -335,6 +335,61 @@ fn relevel_items_on_a_synthetic_inventory() {
     assert!(s.to_bytes().is_ok(), "clamped levels still self-verify");
 }
 
+/// The bulk level setter is one rebuild for the whole batch and agrees with
+/// setting each item individually.
+#[test]
+fn set_item_levels_matches_per_item_edits() {
+    let lib = code_library();
+    let build = || {
+        let mut s = SaveFile::new_character("GD_Siren.Character.CharClass_Siren", "Maya");
+        for e in lib.iter().take(6) {
+            s.add_item_from_code(&e.code, false).unwrap();
+        }
+        s.set_money(555).unwrap();
+        s
+    };
+
+    // Batch: every item to a level of its own.
+    let mut batch = build();
+    let targets: Vec<(usize, i64)> = batch
+        .items()
+        .unwrap()
+        .iter()
+        .map(|it| (it.id, 20 + it.id as i64))
+        .collect();
+    let changed = batch.set_item_levels(&targets).unwrap();
+
+    // Same thing one at a time.
+    let mut one_by_one = build();
+    let mut expect = 0;
+    for (id, lvl) in &targets {
+        if one_by_one.set_item_level(*id, *lvl).unwrap() {
+            expect += 1;
+        }
+    }
+    assert_eq!(changed, expect, "same number of items changed");
+    // Item codes are re-keyed to 0, so they compare deterministically.
+    let codes = |s: &SaveFile| -> Vec<Option<String>> {
+        s.items()
+            .unwrap()
+            .iter()
+            .map(|it| s.item_code(it.id).unwrap())
+            .collect()
+    };
+    assert_eq!(
+        codes(&batch),
+        codes(&one_by_one),
+        "batch and per-item produce the same inventory"
+    );
+    assert_eq!(batch.money(), 555, "currency untouched");
+    assert!(batch.to_bytes().is_ok(), "batch result self-verifies");
+
+    // An empty batch and unknown ids are both no-ops.
+    let mut none = build();
+    assert_eq!(none.set_item_levels(&[]).unwrap(), 0);
+    assert_eq!(none.set_item_levels(&[(9999, 30)]).unwrap(), 0);
+}
+
 /// Part swapping refuses values too wide for the packed slot instead of
 /// silently corrupting the neighbouring fields.
 #[test]

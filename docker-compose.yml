@@ -1,4 +1,4 @@
-# Read-only Borderlands 2 save viewer (WASM), served in your browser.
+# The Borderlands 2 save editor as a web app (WASM), served in your browser.
 #
 #   docker compose up          ->  build + serve at http://localhost:8080
 #

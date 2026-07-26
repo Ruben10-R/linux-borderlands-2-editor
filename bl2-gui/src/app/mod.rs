@@ -318,9 +318,16 @@ impl App {
 
     fn load(&mut self, name: String, path: Option<PathBuf>, bytes: &[u8]) {
         // A character save is the common case (WSG container); a profile.bin has
-        // no WSG, so it fails SaveFile and we try ProfileFile next.
-        if SaveFile::from_bytes(bytes).is_err() {
-            match ProfileFile::from_bytes(bytes) {
+        // no WSG, so it fails SaveFile and we try ProfileFile next. Decode each
+        // at most once — this used to run the save decoder twice (LZO + Huffman
+        // both times) on every successful open.
+        match SaveFile::from_bytes(bytes) {
+            Ok(s) => {
+                self.profile = None;
+                self.doc = Some(doc_from_save(s, name, path));
+                self.status = Some((false, "Loaded.".to_string()));
+            }
+            Err(save_err) => match ProfileFile::from_bytes(bytes) {
                 Ok(p) => {
                     self.doc = None;
                     self.profile = Some(ProfileDoc {
@@ -333,23 +340,13 @@ impl App {
                         profile: p,
                     });
                     self.status = Some((false, "Loaded profile.".to_string()));
-                    return;
                 }
+                // Neither: report the save error, since that's the likely intent.
                 Err(_) => {
-                    // fall through: report the save error below (the likely intent)
+                    self.doc = None;
+                    self.status = Some((true, save_err.to_string()));
                 }
-            }
-        }
-        match SaveFile::from_bytes(bytes) {
-            Ok(s) => {
-                self.profile = None;
-                self.doc = Some(doc_from_save(s, name, path));
-                self.status = Some((false, "Loaded.".to_string()));
-            }
-            Err(e) => {
-                self.doc = None;
-                self.status = Some((true, e.to_string()));
-            }
+            },
         }
     }
 
@@ -530,15 +527,14 @@ impl App {
         }
         if let Some(doc) = self.doc.as_mut() {
             apply_edits(doc).map_err(|e| e.to_string())?;
+            // One rebuild for every pending item level, not one per item.
             let edits: Vec<(usize, i64)> = doc
                 .items
                 .iter()
                 .filter(|v| v.levelable)
                 .map(|v| (v.id, v.level))
                 .collect();
-            for (id, lvl) in edits {
-                let _ = doc.save.set_item_level(id, lvl);
-            }
+            let _ = doc.save.set_item_levels(&edits);
             return Ok(());
         }
         Err("nothing loaded".into())

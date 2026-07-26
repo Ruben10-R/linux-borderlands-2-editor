@@ -116,7 +116,6 @@ pub fn set_bank_size(protobuf: &[u8], slots: i64) -> Result<Vec<u8>> {
 
     let fields = proto::parse_fields(protobuf)?;
     let out = proto::upsert_varint_field(protobuf, &fields, FIELD_BANK_SIZE, new_size);
-    let _ = fields;
     set_black_market_sdu(&out, BANK_SDU_IDX, sdu as u64)
 }
 

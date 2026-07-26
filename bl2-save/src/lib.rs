@@ -602,6 +602,20 @@ impl SaveFile {
         Ok(changed)
     }
 
+    /// Set the level of many items at once, pairing [`Item::id`] with the level
+    /// it should end up at. Ids not listed are untouched. Returns how many
+    /// changed (protected no-level items are skipped, as in
+    /// [`SaveFile::set_item_level`]).
+    ///
+    /// Prefer this over calling [`SaveFile::set_item_level`] in a loop: the whole
+    /// batch is one rebuild of the protobuf instead of one per item.
+    pub fn set_item_levels(&mut self, targets: &[(usize, i64)]) -> Result<usize> {
+        let (new, changed) = items::set_levels(&self.proto, targets)?;
+        proto::only_fields_changed(&self.proto, &new, &[41, 53, 54])?;
+        self.proto = new;
+        Ok(changed)
+    }
+
     /// Swap part `slot` (0-based) of the item with [`Item::id`] `id` to the part
     /// `(lib, asset)`. Only changes slots that already hold a part. Returns whether
     /// it changed. See [`parts_catalog`] for valid `(lib, asset)` values.
